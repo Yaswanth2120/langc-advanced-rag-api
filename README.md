@@ -35,19 +35,28 @@ curl -X POST http://127.0.0.1:8000/ask \
 
 ```text
 LangC/
-├── app.py
 ├── requirements.txt
 ├── pyproject.toml
 ├── render.yaml
 ├── README.md
 ├── .env.example
-├── src/
-│   ├── config.py
-│   ├── schemas.py
-│   └── rag/
-│       ├── documents.py
-│       ├── engine.py
-│       └── prompts.py
+├── app/
+│   ├── main.py
+│   ├── core/
+│   │   └── config.py
+│   ├── api/
+│   │   ├── dependencies.py
+│   │   ├── routes_health.py
+│   │   └── routes_query.py
+│   ├── services/
+│   │   ├── rag_service.py
+│   │   ├── rag_documents.py
+│   │   └── rag_prompts.py
+│   ├── schemas/
+│   │   ├── health.py
+│   │   └── query.py
+│   └── db/
+│       └── supabase_client.py
 ├── examples/
 │   ├── advanced_rag/
 │   ├── basic_langchain/
@@ -59,14 +68,18 @@ LangC/
 ## Important Files
 
 ```text
-app.py                  FastAPI routes and deploy entrypoint
-src/config.py           Environment and model configuration
-src/schemas.py          Request/response models
-src/rag/engine.py       Advanced RAG engine
-src/rag/prompts.py      Prompt templates
-src/rag/documents.py    Current knowledge base
-examples/               Preserved course and advanced RAG demos
-render.yaml             Render free-tier deployment config
+app/main.py                    FastAPI app and deploy entrypoint
+app/core/config.py             Environment and model configuration
+app/api/routes_health.py       Health, features, and Supabase status routes
+app/api/routes_query.py        /ask query route
+app/api/dependencies.py        Shared FastAPI dependencies (RAG engine)
+app/services/rag_service.py    Advanced RAG engine
+app/services/rag_prompts.py    Prompt templates
+app/services/rag_documents.py  Current knowledge base
+app/schemas/                   Request/response models
+app/db/supabase_client.py      Supabase client helper
+examples/                      Preserved course and advanced RAG demos
+render.yaml                    Render free-tier deployment config
 ```
 
 ## Local Setup
@@ -90,7 +103,7 @@ uv sync
 Run locally:
 
 ```bash
-.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8000
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Open:
@@ -165,7 +178,7 @@ Render settings:
 
 ```text
 Build command: pip install -r requirements.txt
-Start command: uvicorn app:app --host 0.0.0.0 --port $PORT
+Start command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Health check: /health
 ```
 

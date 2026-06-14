@@ -1,10 +1,10 @@
 import tempfile
 from dataclasses import dataclass
 
-from src.config import Settings
-from src.rag.documents import DOCUMENTS
-from src.rag.prompts import ANSWER_TEMPLATE, MULTI_QUERY_TEMPLATE, QUERY_REWRITE_TEMPLATE
-from src.schemas import RetrievalMode
+from app.core.config import Settings
+from app.schemas.query import RetrievalMode
+from app.services.rag_documents import DOCUMENTS
+from app.services.rag_prompts import ANSWER_TEMPLATE, MULTI_QUERY_TEMPLATE, QUERY_REWRITE_TEMPLATE
 
 
 @dataclass

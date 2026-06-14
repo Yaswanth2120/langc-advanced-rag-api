@@ -17,9 +17,3 @@ class AskResponse(BaseModel):
     mode: RetrievalMode
     rewritten_query: str | None = None
     retrieved_documents: int
-
-
-class HealthResponse(BaseModel):
-    status: str
-    app: str
-    version: str
