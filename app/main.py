@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import routes_health, routes_query
+from app.api import routes_documents, routes_health, routes_query
 from app.core.config import settings
 
 
@@ -17,3 +17,4 @@ app.add_middleware(
 
 app.include_router(routes_health.router)
 app.include_router(routes_query.router)
+app.include_router(routes_documents.router)

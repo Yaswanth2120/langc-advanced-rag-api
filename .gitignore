@@ -10,3 +10,6 @@ wheels/
 .env
 .venv/
 __pycache__/
+
+# Local document storage (Phase 2 uploads)
+storage/
