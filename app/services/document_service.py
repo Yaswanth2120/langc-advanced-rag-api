@@ -15,6 +15,10 @@ class UnsupportedFileTypeError(ValueError):
     """Raised when an uploaded file has an extension we do not accept."""
 
 
+class DocumentNotFoundError(LookupError):
+    """Raised when a document_id does not match any stored document."""
+
+
 def configure_storage(base_dir: Path) -> None:
     """Point the service at a different storage root (used by tests)."""
     global STORAGE_DIR
@@ -104,3 +108,11 @@ def save_upload(filename: str, content: bytes) -> dict:
 def list_documents() -> list[dict]:
     """Return all stored document metadata records."""
     return _read_metadata()
+
+
+def get_document(document_id: str) -> dict | None:
+    """Return a single document metadata record, or None if not found."""
+    for record in _read_metadata():
+        if record["document_id"] == document_id:
+            return record
+    return None

@@ -1,7 +1,8 @@
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
+from app.schemas.chunk import Chunk
 from app.schemas.document import DocumentMetadata
-from app.services import document_service
+from app.services import chunk_service, document_service
 
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -23,3 +24,21 @@ async def upload_document(file: UploadFile = File(...)):
 @router.get("", response_model=list[DocumentMetadata])
 def list_documents():
     return [DocumentMetadata(**record) for record in document_service.list_documents()]
+
+
+@router.post("/{document_id}/ingest", response_model=list[Chunk])
+def ingest_document(document_id: str):
+    try:
+        chunks = chunk_service.ingest_document(document_id)
+    except document_service.DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found") from exc
+
+    return [Chunk(**record) for record in chunks]
+
+
+@router.get("/{document_id}/chunks", response_model=list[Chunk])
+def list_document_chunks(document_id: str):
+    if document_service.get_document(document_id) is None:
+        raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found")
+
+    return [Chunk(**record) for record in chunk_service.list_chunks(document_id)]
