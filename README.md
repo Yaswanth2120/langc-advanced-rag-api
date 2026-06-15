@@ -203,6 +203,33 @@ SUPABASE_KEY
 
 The current tests validate health and feature metadata without calling OpenAI.
 
+## Evaluations
+
+A local evaluation pipeline measures the quality of the uploaded-document RAG
+flow. It seeds a fixed corpus into an isolated temporary storage directory,
+runs the questions in `evals/questions.json` through the pure-Python extractive
+pipeline, and writes a report to `evals/results.md`.
+
+It makes no OpenAI calls and uses no embeddings or vector database.
+
+Run the evals:
+
+```bash
+.venv/bin/python -m evals.run_eval
+```
+
+Reported metrics:
+
+```text
+retrieval hit rate         expected document appears in the returned sources
+citation/source presence   answerable questions return non-empty sources
+fallback accuracy          out-of-scope questions return the fallback message
+latency_ms                 per-question and average answer latency
+```
+
+Edit `evals/questions.json` to add cases. Each item has a `type` of
+`answerable` (with `expected_source` and `expected_keywords`) or `fallback`.
+
 ## Resume Bullet
 
 Built a production-style advanced RAG API using FastAPI, LangChain, OpenAI embeddings, Chroma vector search, contextual chunking, multi-query retrieval, hybrid keyword/vector retrieval, and agentic query rewrite/retry, with LangSmith observability, optional Supabase integration, tests, and Render-ready deployment configuration.

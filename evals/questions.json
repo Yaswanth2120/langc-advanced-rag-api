@@ -1,0 +1,34 @@
+[
+  {
+    "question": "What does the Voyager spacecraft carry into space?",
+    "type": "answerable",
+    "expected_source": "voyager",
+    "expected_keywords": ["golden record"]
+  },
+  {
+    "question": "How do falcons hunt their prey?",
+    "type": "answerable",
+    "expected_source": "falcons",
+    "expected_keywords": ["dive", "prey"]
+  },
+  {
+    "question": "What does photosynthesis convert sunlight into?",
+    "type": "answerable",
+    "expected_source": "photosynthesis",
+    "expected_keywords": ["chemical energy"]
+  },
+  {
+    "question": "Which ocean is the largest on Earth?",
+    "type": "answerable",
+    "expected_source": "oceans",
+    "expected_keywords": ["Pacific"]
+  },
+  {
+    "question": "Explain quantum chromodynamics renormalization techniques",
+    "type": "fallback"
+  },
+  {
+    "question": "Describe medieval Byzantine taxation policy",
+    "type": "fallback"
+  }
+]
