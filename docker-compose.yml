@@ -1,0 +1,14 @@
+services:
+  api:
+    build: .
+    image: docuintelai
+    ports:
+      - "8000:8000"
+    # .env is optional — the API boots without it. Document upload, ingestion,
+    # query, and eval need no credentials.
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # Persist uploaded documents and chunks across container restarts.
+      - ./storage:/app/storage

@@ -112,6 +112,46 @@ Open:
 http://127.0.0.1:8000/docs
 ```
 
+## Makefile Commands
+
+Common tasks are wrapped in a `Makefile`. Override the interpreter with
+`PYTHON=` (for example `make test PYTHON=.venv/bin/python`).
+
+```text
+make install       Install dependencies from requirements.txt
+make test          Run the test suite
+make run           Run the API locally on port 8000
+make eval          Run the local RAG evaluation
+make docker-build  Build the Docker image
+make docker-run    Run the Docker image (uses .env if present)
+```
+
+## Docker
+
+Build and run with Docker:
+
+```bash
+make docker-build
+make docker-run
+```
+
+Or directly:
+
+```bash
+docker build -t docuintelai .
+docker run -p 8000:8000 docuintelai
+```
+
+The API boots without any credentials. To supply them, create `.env` from
+`.env.example`; `docker run` and `docker compose` pick it up automatically when
+present and start fine without it.
+
+With Docker Compose (persists uploaded documents in `./storage`):
+
+```bash
+docker compose up --build
+```
+
 ## API Endpoints
 
 ```text

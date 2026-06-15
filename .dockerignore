@@ -1,0 +1,28 @@
+# Virtual environments
+.venv/
+.venv*/
+
+# Version control
+.git/
+.gitignore
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+wheels/
+
+# Local runtime data and secrets
+storage/
+.env
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+
+# Project notes not needed in the image
+agents/
+phases/
