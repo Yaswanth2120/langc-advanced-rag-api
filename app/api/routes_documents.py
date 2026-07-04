@@ -1,11 +1,16 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
+from app.api.dependencies import require_api_key
 from app.schemas.chunk import Chunk
 from app.schemas.document import DocumentMetadata
 from app.services import chunk_service, document_service
 
 
-router = APIRouter(prefix="/documents", tags=["documents"])
+router = APIRouter(
+    prefix="/documents",
+    tags=["documents"],
+    dependencies=[Depends(require_api_key)],
+)
 
 
 @router.post("/upload", response_model=DocumentMetadata)

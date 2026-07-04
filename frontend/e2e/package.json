@@ -1,0 +1,12 @@
+{
+  "name": "docuintelai-frontend-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Headless end-to-end test of the DocuIntelAI frontend (upload, list, query).",
+  "scripts": {
+    "test": "node frontend.test.js"
+  },
+  "dependencies": {
+    "playwright": "^1.49.1"
+  }
+}

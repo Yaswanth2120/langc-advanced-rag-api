@@ -29,6 +29,16 @@ def _uploads_dir() -> Path:
     return STORAGE_DIR / "uploads"
 
 
+def stored_path_for(document_id: str, file_type: str) -> Path:
+    """Local path of the original uploaded file for a document."""
+    return _uploads_dir() / f"{document_id}.{file_type}"
+
+
+def text_path_for(document_id: str) -> Path:
+    """Local path of the extracted plain text for a document."""
+    return _uploads_dir() / f"{document_id}.txt"
+
+
 def _metadata_file() -> Path:
     return STORAGE_DIR / "documents.json"
 
@@ -81,37 +91,54 @@ def save_upload(filename: str, content: bytes) -> dict:
     uploads_dir = _uploads_dir()
     uploads_dir.mkdir(parents=True, exist_ok=True)
 
-    stored_path = uploads_dir / f"{document_id}{extension}"
+    file_type = extension.lstrip(".")
+    stored_path = stored_path_for(document_id, file_type)
     stored_path.write_bytes(content)
 
     text = _extract_text(stored_path, extension)
-    text_path = uploads_dir / f"{document_id}.txt"
-    text_path.write_text(text, encoding="utf-8")
+    text_path_for(document_id).write_text(text, encoding="utf-8")
 
+    # The persisted metadata record is exactly the DocumentMetadata schema
+    # (app/schemas/document.py) and the Supabase ``documents`` table columns.
+    # The on-disk file locations are derived from document_id/file_type
+    # (see stored_path_for/text_path_for), not stored, so this record matches
+    # the table field-for-field whether it goes to Supabase or local JSON.
     record = {
         "document_id": document_id,
         "filename": filename,
-        "file_type": extension.lstrip("."),
+        "file_type": file_type,
         "status": "uploaded",
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "stored_path": str(stored_path),
-        "text_path": str(text_path),
     }
 
-    records = _read_metadata()
-    records.append(record)
-    _write_metadata(records)
+    from app.db import document_repository
+
+    if document_repository.enabled():
+        document_repository.insert(record)
+    else:
+        records = _read_metadata()
+        records.append(record)
+        _write_metadata(records)
 
     return record
 
 
 def list_documents() -> list[dict]:
     """Return all stored document metadata records."""
+    from app.db import document_repository
+
+    if document_repository.enabled():
+        return document_repository.list_all()
     return _read_metadata()
 
 
 def get_document(document_id: str) -> dict | None:
     """Return a single document metadata record, or None if not found."""
+    from app.db import document_repository
+
+    if document_repository.enabled():
+        return document_repository.get(document_id)
+
     for record in _read_metadata():
         if record["document_id"] == document_id:
             return record

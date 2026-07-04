@@ -1,7 +1,15 @@
+import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
+
+# Force offline/deterministic config before app import (mirrors tests/__init__,
+# in case the suite is run without the tests package being imported first).
+for _var in ("OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_KEY", "LANGSMITH_API_KEY"):
+    os.environ[_var] = ""
+os.environ["API_KEY"] = "test-api-key"
+os.environ["LANGSMITH_TRACING"] = "false"
 
 from fastapi.testclient import TestClient
 
@@ -9,9 +17,13 @@ from app.main import app
 from app.services import document_service
 
 
+API_KEY = "test-api-key"
+
+
 class DocumentsTestCase(unittest.TestCase):
     def setUp(self):
-        self.client = TestClient(app)
+        # Protected routes now require X-API-Key; send it by default.
+        self.client = TestClient(app, headers={"X-API-Key": API_KEY})
         self._tmp_dir = Path(tempfile.mkdtemp())
         self._original_storage = document_service.STORAGE_DIR
         document_service.configure_storage(self._tmp_dir)

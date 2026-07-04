@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.api.dependencies import get_rag_engine
+from app.api.dependencies import get_rag_engine, require_api_key
+from app.core.rate_limit import current_rate_limit, limiter
 from app.schemas.document_query import DocumentQueryRequest, DocumentQueryResponse
 from app.schemas.query import AskRequest, AskResponse
 from app.services import document_qa_service
@@ -11,9 +12,14 @@ router = APIRouter()
 
 
 @router.post("/ask", response_model=AskResponse)
-def ask(request: AskRequest, engine: AdvancedRAGEngine = Depends(get_rag_engine)):
+@limiter.limit(current_rate_limit)
+def ask(
+    request: Request,
+    body: AskRequest,
+    engine: AdvancedRAGEngine = Depends(get_rag_engine),
+):
     try:
-        result = engine.answer(request.question, request.mode)
+        result = engine.answer(body.question, body.mode)
         return AskResponse(
             answer=result.answer,
             sources=result.sources,
@@ -25,7 +31,12 @@ def ask(request: AskRequest, engine: AdvancedRAGEngine = Depends(get_rag_engine)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/query/documents", response_model=DocumentQueryResponse)
-def query_documents(request: DocumentQueryRequest):
-    result = document_qa_service.answer_question(request.question)
+@router.post(
+    "/query/documents",
+    response_model=DocumentQueryResponse,
+    dependencies=[Depends(require_api_key)],
+)
+@limiter.limit(current_rate_limit)
+def query_documents(request: Request, body: DocumentQueryRequest):
+    result = document_qa_service.answer_question(body.question)
     return DocumentQueryResponse(**result)

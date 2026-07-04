@@ -55,7 +55,11 @@ def ingest_document(document_id: str) -> list[dict]:
     if document is None:
         raise document_service.DocumentNotFoundError(document_id)
 
-    text = Path(document["text_path"]).read_text(encoding="utf-8", errors="replace")
+    # Local file location is derived from the id (not stored in metadata),
+    # so this works whether the metadata came from Supabase or local JSON.
+    text = document_service.text_path_for(document_id).read_text(
+        encoding="utf-8", errors="replace"
+    )
     pieces = _split_text(text, settings.chunk_size, settings.chunk_overlap)
 
     created_at = datetime.now(timezone.utc).isoformat()
@@ -73,6 +77,11 @@ def ingest_document(document_id: str) -> list[dict]:
     # Replace any prior chunks for this document (idempotent re-ingest).
     others = [c for c in _read_chunks() if c["document_id"] != document_id]
     _write_chunks(others + new_chunks)
+
+    # Embed the chunks into the Chroma collection used by /query/documents.
+    from app.services import vector_store
+
+    vector_store.index_document(document_id, new_chunks)
 
     return new_chunks
 

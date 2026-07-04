@@ -24,4 +24,46 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run tests
-        run: python -m unittest discover -s tests
+        env:
+          # Makes tests/test_supabase_integration.py run for real in CI instead
+          # of skipping. SUPABASE_TEST_* is used because the test bootstrap
+          # empties SUPABASE_URL/SUPABASE_KEY for offline determinism.
+          SUPABASE_TEST_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_TEST_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -m unittest discover -s tests -t .
+
+  frontend-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Playwright + Chromium
+        working-directory: frontend/e2e
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Run frontend E2E (local backend mode)
+        working-directory: frontend/e2e
+        env:
+          BACKEND_MODE: local
+          PYTHON: python
+          # Playwright test uses channel:chrome by default; use bundled chromium in CI.
+          PW_CHANNEL: chromium
+        run: ./run.sh

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DocuIntelAI</title>
+  <style>
+    :root {
+      --bg: #0f1216; --panel: #171b21; --panel-2: #1e242c; --line: #2a323c;
+      --text: #e6e9ee; --muted: #9aa4b2; --accent: #4f8cff; --accent-2: #3a6fd8;
+      --ok: #3ecf8e; --warn: #f5a623; --err: #ff5c5c; --chip: #24303f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+    h1 { font-size: 22px; margin: 0 0 2px; letter-spacing: .3px; }
+    .tag { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      padding: 16px 18px; margin-bottom: 16px;
+    }
+    .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 12px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+    input[type=text], input[type=password], textarea, input[type=file] {
+      width: 100%; background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; font: inherit;
+    }
+    textarea { resize: vertical; min-height: 70px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .row > * { flex: 1; min-width: 180px; }
+    .actions { display: flex; gap: 10px; margin-top: 12px; align-items: center; }
+    button {
+      background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+      padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer;
+    }
+    button:hover { background: var(--accent-2); }
+    button.secondary { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); font-weight: 500; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .note { font-size: 12px; color: var(--warn); margin-top: 8px; }
+    #banner { display: none; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-weight: 500; }
+    #banner.show { display: block; }
+    #banner.error { background: #3a1d1d; border: 1px solid var(--err); color: #ffb4b4; }
+    #banner.ok { background: #17322a; border: 1px solid var(--ok); color: #a7f0cf; }
+    #banner.info { background: #1b2a3f; border: 1px solid var(--accent); color: #bcd4ff; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-weight: 600; }
+    td.mono, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); }
+    .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+    #answer { white-space: pre-wrap; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-top: 6px; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .chip { background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+    .meter { height: 8px; background: var(--panel-2); border-radius: 999px; overflow: hidden; margin-top: 6px; border: 1px solid var(--line); }
+    .meter > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--ok)); }
+    .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: r .7s linear infinite; }
+    @keyframes r { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>DocuIntelAI</h1>
+    <div class="tag">Upload documents, then ask questions grounded in them.</div>
+
+    <div id="banner" role="alert" aria-live="polite"></div>
+
+    <div class="card">
+      <h2>Connection</h2>
+      <div class="row">
+        <div>
+          <label for="baseUrl">API base URL</label>
+          <input id="baseUrl" type="text" placeholder="http://127.0.0.1:8000" />
+        </div>
+        <div>
+          <label for="apiKey">API key (X-API-Key)</label>
+          <input id="apiKey" type="password" placeholder="your API key" />
+        </div>
+      </div>
+      <div class="actions">
+        <button id="saveConn">Save &amp; connect</button>
+        <span id="connState" class="mono"></span>
+      </div>
+      <div class="note">Demo only: the API key is kept in <code>localStorage</code>/this form. That is not
+        secure client-side credential storage and must not be used for real production auth.</div>
+    </div>
+
+    <div class="card">
+      <h2>Upload document</h2>
+      <label for="file">.txt, .md, or .pdf</label>
+      <input id="file" type="file" accept=".txt,.md,.pdf" />
+      <div class="actions">
+        <button id="uploadBtn">Upload &amp; ingest</button>
+        <span id="uploadState"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Documents</h2>
+      <div class="actions" style="margin-top:0;margin-bottom:10px">
+        <button id="refreshBtn" class="secondary">Refresh list</button>
+      </div>
+      <div id="docsWrap"><div class="empty">No documents loaded yet.</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Ask a question</h2>
+      <textarea id="question" placeholder="What does the document say about…?"></textarea>
+      <div class="actions">
+        <button id="askBtn">Ask</button>
+        <span id="askState"></span>
+      </div>
+      <div id="result" style="display:none;margin-top:14px">
+        <label>Answer</label>
+        <div id="answer"></div>
+        <label style="margin-top:12px">Sources</label>
+        <div id="sources" class="chips"></div>
+        <label style="margin-top:12px">Confidence: <span id="confVal" class="mono"></span></label>
+        <div class="meter"><span id="confBar" style="width:0%"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = {
+      baseUrl: localStorage.getItem("docuintel.baseUrl") || "http://127.0.0.1:8000",
+      apiKey: localStorage.getItem("docuintel.apiKey") || "",
+    };
+    $("baseUrl").value = state.baseUrl;
+    $("apiKey").value = state.apiKey;
+
+    function banner(kind, msg) {
+      const b = $("banner");
+      b.className = "show " + kind;
+      b.textContent = msg;
+    }
+    function clearBanner() { $("banner").className = ""; }
+
+    function humanError(status, detail) {
+      const map = {
+        401: "Unauthorized (401): missing or invalid API key.",
+        403: "Forbidden (403).",
+        404: "Not found (404).",
+        429: "Rate limited (429): too many requests — slow down and retry.",
+        500: "Server error (500).",
+      };
+      const base = map[status] || `Request failed (${status}).`;
+      return detail ? `${base} ${detail}` : base;
+    }
+
+    // Central fetch: prefixes base URL, attaches X-API-Key, normalizes errors.
+    async function api(path, opts = {}) {
+      const headers = new Headers(opts.headers || {});
+      if (state.apiKey) headers.set("X-API-Key", state.apiKey);
+      let res;
+      try {
+        res = await fetch(state.baseUrl.replace(/\/$/, "") + path, { ...opts, headers });
+      } catch (e) {
+        throw new Error("Network error: cannot reach " + state.baseUrl + " (" + e.message + ")");
+      }
+      const text = await res.text();
+      let body = null;
+      try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+      if (!res.ok) {
+        const detail = body && body.detail ? (typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail)) : "";
+        const err = new Error(humanError(res.status, detail));
+        err.status = res.status;
+        throw err;
+      }
+      return body;
+    }
+
+    async function loadDocuments() {
+      const wrap = $("docsWrap");
+      try {
+        const docs = await api("/documents");
+        if (!docs || docs.length === 0) {
+          wrap.innerHTML = '<div class="empty">No documents uploaded yet.</div>';
+          return;
+        }
+        const rows = docs.map((d) => `
+          <tr>
+            <td>${escapeHtml(d.filename)}</td>
+            <td>${escapeHtml(d.file_type)}</td>
+            <td>${escapeHtml(d.status)}</td>
+            <td class="mono">${escapeHtml((d.created_at || "").slice(0, 19))}</td>
+            <td class="mono">${escapeHtml((d.document_id || "").slice(0, 8))}</td>
+          </tr>`).join("");
+        wrap.innerHTML = `<table><thead><tr>
+          <th>Filename</th><th>Type</th><th>Status</th><th>Created</th><th>ID</th>
+        </tr></thead><tbody>${rows}</tbody></table>`;
+      } catch (e) {
+        wrap.innerHTML = '<div class="empty">Could not load documents.</div>';
+        banner("error", e.message);
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    $("saveConn").onclick = async () => {
+      state.baseUrl = $("baseUrl").value.trim();
+      state.apiKey = $("apiKey").value;
+      localStorage.setItem("docuintel.baseUrl", state.baseUrl);
+      localStorage.setItem("docuintel.apiKey", state.apiKey);
+      clearBanner();
+      $("connState").textContent = "checking…";
+      try {
+        const h = await api("/health");
+        let backend = "";
+        try {
+          const feats = await api("/features");
+          if (feats && feats.embedding_backend) backend = " · backend: " + feats.embedding_backend;
+        } catch { /* /features is open; ignore if unavailable */ }
+        $("connState").textContent = "connected · " + (h.status || "ok") + backend;
+        banner("ok", "Connected to " + state.baseUrl);
+        loadDocuments();
+      } catch (e) {
+        $("connState").textContent = "not connected";
+        banner("error", e.message);
+      }
+    };
+
+    $("uploadBtn").onclick = async () => {
+      const f = $("file").files[0];
+      if (!f) { banner("error", "Choose a file first."); return; }
+      clearBanner();
+      const btn = $("uploadBtn"); btn.disabled = true;
+      $("uploadState").innerHTML = '<span class="spin"></span>';
+      try {
+        const fd = new FormData();
+        fd.append("file", f);
+        const doc = await api("/documents/upload", { method: "POST", body: fd });
+        // Auto-ingest so the document is immediately queryable.
+        let chunks = [];
+        try { chunks = await api(`/documents/${doc.document_id}/ingest`, { method: "POST" }); } catch (e) { /* surfaced below */ }
+        $("uploadState").textContent = "";
+        banner("ok", `Uploaded "${doc.filename}" and ingested ${chunks.length} chunk(s).`);
+        loadDocuments();
+      } catch (e) {
+        $("uploadState").textContent = "";
+        banner("error", e.message);
+      } finally { btn.disabled = false; }
+    };
+
+    $("refreshBtn").onclick = () => { clearBanner(); loadDocuments(); };
+
+    $("askBtn").onclick = async () => {
+      const q = $("question").value.trim();
+      if (!q) { banner("error", "Type a question first."); return; }
+      clearBanner();
+      const btn = $("askBtn"); btn.disabled = true;
+      $("askState").innerHTML = '<span class="spin"></span>';
+      $("result").style.display = "none";
+      try {
+        const r = await api("/query/documents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: q }),
+        });
+        $("answer").textContent = r.answer;
+        const src = $("sources");
+        src.innerHTML = (r.sources && r.sources.length)
+          ? r.sources.map((s) => `<span class="chip">${escapeHtml(s)}</span>`).join("")
+          : '<span class="empty">none</span>';
+        const conf = Number(r.confidence_score || 0);
+        $("confVal").textContent = conf.toFixed(4);
+        $("confBar").style.width = Math.max(0, Math.min(100, conf * 100)) + "%";
+        $("result").style.display = "block";
+      } catch (e) {
+        banner("error", e.message);
+      } finally { btn.disabled = false; $("askState").textContent = ""; }
+    };
+
+    // Auto-connect on load if a key is already stored.
+    if (state.apiKey) $("saveConn").click();
+  </script>
+</body>
+</html>

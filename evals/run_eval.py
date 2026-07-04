@@ -1,11 +1,13 @@
 """Local RAG evaluation runner for DocuIntelAI.
 
 Seeds a fixed in-script corpus into an isolated temporary storage directory,
-runs the questions in ``questions.json`` through the local extractive QA
-pipeline, and writes ``results.md``.
+runs the questions in ``questions.json`` through the ``/query/documents``
+retrieval pipeline (``document_qa_service.answer_question``), and writes
+``results.md``.
 
-No OpenAI calls, no embeddings, no vector database — it exercises only the
-pure-Python ``document_qa_service.answer_question`` pipeline.
+The runner pins offline mode for its entire run (see ``app.core.offline``), so
+it makes no OpenAI calls and never touches Supabase regardless of ``.env``
+contents — retrieval uses the deterministic local hashing embeddings only.
 
 The corpus logical names below must match the ``expected_source`` values in
 ``questions.json``.
@@ -17,6 +19,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from app.core import offline
 from app.services import chunk_service, document_qa_service, document_service
 
 
@@ -179,14 +182,23 @@ def run(
     corpus = CORPUS if corpus is None else corpus
     questions = load_questions(questions_path)
 
+    from app.services import vector_store
+
     tmp_dir = Path(tempfile.mkdtemp())
     original_storage = document_service.STORAGE_DIR
+    original_offline = offline.is_offline()
+    # Pin offline mode: no OpenAI calls, no Supabase, local embeddings only,
+    # regardless of environment/.env contents (phase 4 constraint).
+    offline.set_offline(True)
     document_service.configure_storage(tmp_dir)
+    vector_store.reset()
     try:
         name_to_id = seed_corpus(corpus)
         results = evaluate(questions, name_to_id)
     finally:
         document_service.configure_storage(original_storage)
+        vector_store.reset()
+        offline.set_offline(original_offline)
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
     if results_path is not None:

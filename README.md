@@ -7,12 +7,19 @@ This repo is cleaned up as a portfolio-ready project: one production API, organi
 ## What It Does
 
 - Answers questions through a FastAPI `/ask` endpoint.
-- Uses OpenAI embeddings and Chroma vector search.
-- Supports multiple advanced RAG retrieval modes.
+- Uploads documents, ingests them, and answers questions grounded in them
+  through `/documents/*` and `/query/documents`.
+- Uses OpenAI embeddings and Chroma vector search for both flows.
+- Supports multiple advanced RAG retrieval modes on `/ask`.
 - Adds source/topic context to chunks before embedding.
 - Returns answers with source names and retrieval metadata.
+- Protects document and query routes with an `X-API-Key` header.
+- Rate limits the answer endpoints per client IP.
+- Persists document metadata in Supabase when configured, with a local JSON
+  fallback.
+- Ships a minimal static web UI (`frontend/`) for upload, listing, and querying.
+- Restricts browser access with an explicit CORS allow-list.
 - Uses LangSmith tracing when enabled.
-- Includes optional Supabase health validation for future persistence.
 
 ## Advanced RAG Modes
 
@@ -41,45 +48,38 @@ LangC/
 ├── README.md
 ├── .env.example
 ├── app/
-│   ├── main.py
+│   ├── main.py                    FastAPI app, CORS, rate limiter
 │   ├── core/
-│   │   └── config.py
+│   │   ├── config.py              Env + model configuration
+│   │   ├── rate_limit.py          slowapi limiter
+│   │   └── offline.py             Force local/no-network backends
 │   ├── api/
-│   │   ├── dependencies.py
-│   │   ├── routes_health.py
-│   │   └── routes_query.py
+│   │   ├── dependencies.py        RAG engine + X-API-Key auth
+│   │   ├── routes_health.py       /, /health, /features, /supabase/health
+│   │   ├── routes_query.py        /ask, /query/documents
+│   │   └── routes_documents.py    /documents upload/list/ingest/chunks
 │   ├── services/
-│   │   ├── rag_service.py
-│   │   ├── rag_documents.py
-│   │   └── rag_prompts.py
-│   ├── schemas/
-│   │   ├── health.py
-│   │   └── query.py
+│   │   ├── rag_service.py         Advanced RAG engine (/ask)
+│   │   ├── rag_backends.py        OpenAI vs local embedding/LLM selection
+│   │   ├── local_embeddings.py    Deterministic offline embeddings
+│   │   ├── vector_store.py        Chroma collection for uploaded docs
+│   │   ├── document_service.py    Upload + metadata (Supabase/local)
+│   │   ├── document_qa_service.py Grounded QA over uploaded docs
+│   │   ├── chunk_service.py       Chunking + ingest
+│   │   ├── rag_documents.py       Built-in knowledge base (/ask)
+│   │   └── rag_prompts.py         Prompt templates
+│   ├── schemas/                   Request/response models
 │   └── db/
-│       └── supabase_client.py
-├── examples/
-│   ├── advanced_rag/
-│   ├── basic_langchain/
-│   └── langgraph/
-└── tests/
-    └── test_health.py
-```
-
-## Important Files
-
-```text
-app/main.py                    FastAPI app and deploy entrypoint
-app/core/config.py             Environment and model configuration
-app/api/routes_health.py       Health, features, and Supabase status routes
-app/api/routes_query.py        /ask query route
-app/api/dependencies.py        Shared FastAPI dependencies (RAG engine)
-app/services/rag_service.py    Advanced RAG engine
-app/services/rag_prompts.py    Prompt templates
-app/services/rag_documents.py  Current knowledge base
-app/schemas/                   Request/response models
-app/db/supabase_client.py      Supabase client helper
-examples/                      Preserved course and advanced RAG demos
-render.yaml                    Render free-tier deployment config
+│       ├── supabase_client.py     Supabase client helper
+│       └── document_repository.py Supabase documents table access
+├── frontend/
+│   ├── index.html                 Static web UI
+│   └── e2e/                       Headless Playwright test
+├── supabase/
+│   └── migrations/                SQL schema (documents table)
+├── evals/                         Local RAG evaluation pipeline
+├── examples/                      Preserved course and advanced RAG demos
+└── tests/                         Unit + integration tests
 ```
 
 ## Local Setup
@@ -152,15 +152,103 @@ With Docker Compose (persists uploaded documents in `./storage`):
 docker compose up --build
 ```
 
+## Frontend (Web UI)
+
+A single static page (`frontend/index.html`, plain HTML/CSS/JS, no build step)
+provides upload, document listing, and grounded querying with sources and a
+confidence score. It calls `/features` on connect and shows the active
+embedding backend (`openai` or `local_hash`).
+
+Run the backend with an API key configured, then serve the folder statically:
+
+```bash
+API_KEY=demo-key .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+python -m http.server 5500 --directory frontend
+# open http://127.0.0.1:5500
+```
+
+In the UI set the API base URL and API key, click **Save & connect**, upload a
+document, then ask a question. The API key is stored in `localStorage` and sent
+as `X-API-Key` — a **demo-only** convenience, not secure credential storage.
+
+An automated headless-browser test lives in `frontend/e2e/` and drives the
+three actions end-to-end:
+
+```bash
+BACKEND_MODE=local bash frontend/e2e/run.sh   # boots backend + static, runs the test
+```
+
+## CORS
+
+Browser access is restricted to an explicit allow-list (not `*`). It defaults
+to the local static frontend origins and is configurable via
+`CORS_ALLOW_ORIGINS` (comma-separated):
+
+```text
+CORS_ALLOW_ORIGINS=http://localhost:5500,http://127.0.0.1:5500
+```
+
+Requests from any other origin are rejected by the browser preflight.
+
 ## API Endpoints
 
 ```text
-GET  /                 API info
-GET  /health           Health check
-GET  /features         Lists RAG capabilities
-POST /ask              Ask a RAG question
-GET  /supabase/health  Checks Supabase config
+GET  /                          API info
+GET  /health                    Health check
+GET  /features                  Lists RAG capabilities
+POST /ask                       Ask a RAG question (rate limited)
+GET  /supabase/health           Checks Supabase config
+POST /documents/upload          Upload a .txt/.md/.pdf document (auth)
+GET  /documents                 List uploaded documents (auth)
+POST /documents/{id}/ingest     Chunk + embed a document into Chroma (auth)
+GET  /documents/{id}/chunks     List a document's chunks (auth)
+POST /query/documents           Answer from uploaded docs (auth, rate limited)
 ```
+
+Routes marked `(auth)` require the `X-API-Key` header when `API_KEY` is set;
+`/health` and `/features` are always open.
+
+## Authentication
+
+Set `API_KEY` in the environment to require an `X-API-Key` header on all
+`/documents/*` and `/query/*` routes:
+
+```bash
+curl -X POST http://127.0.0.1:8000/query/documents \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"What does the uploaded document say?"}'
+```
+
+Auth **fails closed**: if `API_KEY` is unset or empty, every `/documents/*` and
+`/query/*` request is rejected with 401 (the routes are locked, never silently
+open). The app still boots without credentials — the protected routes are just
+unusable until `API_KEY` is configured. `/health` and `/features` remain open.
+
+## Rate Limiting
+
+`/ask` and `/query/documents` are rate limited per client IP via slowapi.
+Configure the limit with `RATE_LIMIT` (slowapi syntax, default `30/minute`).
+Exceeding it returns HTTP 429.
+
+## Uploaded-Document RAG
+
+`/query/documents` answers strictly from uploaded documents:
+
+1. `POST /documents/upload` stores a `.txt`, `.md`, or `.pdf` file.
+2. `POST /documents/{id}/ingest` chunks the text and embeds the chunks into a
+   Chroma collection.
+3. `POST /query/documents` embeds the question, retrieves the most similar
+   chunks, and generates a grounded answer from them.
+
+When `OPENAI_API_KEY` is set, this flow uses OpenAI embeddings and an OpenAI
+chat model. Without a key it falls back to a deterministic local embedding and
+an extractive answer built from the retrieved chunks, so it runs fully offline.
+This fallback has lower retrieval quality, so it is never silent: the app logs
+a warning and `/features` reports the active backend as
+`"embedding_backend": "local_hash"` (vs `"openai"`). Chunks scoring below
+`RAG_RELEVANCE_THRESHOLD` are ignored; if none qualify the endpoint returns a
+fallback message with no sources.
 
 ## Environment Variables
 
@@ -177,9 +265,14 @@ LANGSMITH_PROJECT=multi-agent-research
 
 SUPABASE_URL=your_supabase_project_url
 SUPABASE_KEY=your_supabase_anon_key
+
+API_KEY=your_api_key
+RATE_LIMIT=30/minute
+CORS_ALLOW_ORIGINS=http://localhost:5500,http://127.0.0.1:5500
 ```
 
-Supabase is optional for the current API. The app runs without it, but `/supabase/health` will return `configured: false`.
+See `.env.example` for the full list. Supabase is optional; the app runs
+without it, and `/supabase/health` will return `configured: false`.
 
 ## LangSmith Setup
 
@@ -194,14 +287,29 @@ LangSmith projects usually appear after the first traced request.
 
 ## Supabase Setup
 
-1. Create a free Supabase project.
-2. Copy the project URL.
-3. Copy the anon/public key.
-4. Add both to `.env`.
-5. Run the API.
-6. Visit `/supabase/health`.
+When `SUPABASE_URL` and `SUPABASE_KEY` are set, document metadata (the
+`DocumentMetadata` fields) is persisted to a Supabase `documents` table instead
+of the local `storage/documents.json` file. When they are unset, the app falls
+back to local JSON.
 
-Use Supabase later for uploaded documents, metadata, chat history, user auth, or persistent vector metadata.
+1. Create a free Supabase project.
+2. Copy the project URL and the anon/publishable key into `.env`.
+3. Provision the schema from this repo — do not create the table by hand:
+
+   ```bash
+   supabase link --project-ref <your-project-ref>
+   supabase db push        # applies supabase/migrations/001_documents.sql
+   ```
+
+   The migration creates `public.documents` with columns matching
+   `app/schemas/document.py` exactly (`document_id`, `filename`, `file_type`,
+   `status`, `created_at`) and a row-level-security policy allowing the anon
+   key to read/write it.
+4. Run the API and visit `/supabase/health`.
+
+The `documents` table must exist before uploads work with Supabase enabled —
+`tests/test_supabase_integration.py` exercises this end-to-end against a real
+project (and is skipped when no credentials are present).
 
 ## Deployment Plan
 
@@ -233,24 +341,39 @@ LANGSMITH_API_KEY
 LANGSMITH_PROJECT
 SUPABASE_URL
 SUPABASE_KEY
+API_KEY
+RATE_LIMIT
+CORS_ALLOW_ORIGINS
 ```
 
 ## Testing
 
 ```bash
-.venv/bin/python -m unittest discover -s tests
+.venv/bin/python -m unittest discover -s tests -t .
 ```
 
-The current tests validate health and feature metadata without calling OpenAI.
+The tests cover health/feature metadata, document upload and ingestion, the
+uploaded-document RAG flow (embedding retrieval via Chroma), API-key auth, and
+rate limiting. They run fully offline by default: the suite forces the local
+embedding backend, so no OpenAI calls are made.
+
+`tests/test_supabase_integration.py` is an integration test that runs against a
+real Supabase project. It is skipped unless credentials are provided, and runs
+in CI via the `SUPABASE_URL` / `SUPABASE_KEY` GitHub Actions secrets (passed as
+`SUPABASE_TEST_URL` / `SUPABASE_TEST_KEY`). A separate CI job runs the
+Playwright frontend end-to-end test. See `.github/workflows/tests.yml`.
 
 ## Evaluations
 
 A local evaluation pipeline measures the quality of the uploaded-document RAG
 flow. It seeds a fixed corpus into an isolated temporary storage directory,
-runs the questions in `evals/questions.json` through the pure-Python extractive
-pipeline, and writes a report to `evals/results.md`.
+runs the questions in `evals/questions.json` through the same
+`/query/documents` retrieval pipeline (Chroma similarity search), and writes a
+report to `evals/results.md`.
 
-It makes no OpenAI calls and uses no embeddings or vector database.
+It uses the same retrieval backend as `/query/documents`: OpenAI embeddings
+when `OPENAI_API_KEY` is set, otherwise the offline local embedding backend
+(no network calls). The test suite always runs it against the local backend.
 
 Run the evals:
 
@@ -274,11 +397,14 @@ Edit `evals/questions.json` to add cases. Each item has a `type` of
 
 Built a production-style advanced RAG API using FastAPI, LangChain, OpenAI embeddings, Chroma vector search, contextual chunking, multi-query retrieval, hybrid keyword/vector retrieval, and agentic query rewrite/retry, with LangSmith observability, optional Supabase integration, tests, and Render-ready deployment configuration.
 
-## Next Production Improvements
+## Still Missing / Future Work
 
-- Add document upload and ingestion endpoints.
-- Persist uploaded document metadata in Supabase.
-- Add authentication before public deployment.
-- Add evaluation datasets in LangSmith.
-- Add rate limiting and request logging.
-- Replace local Chroma with a managed vector database if traffic grows.
+The following are genuinely not yet done after this phase:
+
+- Request logging and structured observability for the document routes.
+- Per-key (not just per-IP) rate limiting and multiple API keys / roles.
+- Storing uploaded files and Chroma vectors in durable cloud storage rather
+  than the local `storage/` directory (metadata already persists to Supabase
+  when configured).
+- Evaluation datasets in LangSmith (the local eval in `evals/` is offline).
+- A managed vector database if traffic outgrows local Chroma.

@@ -17,10 +17,22 @@ class Settings:
     chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "650"))
     chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "80"))
     top_k: int = int(os.getenv("RAG_TOP_K", "4"))
+    relevance_threshold: float = float(os.getenv("RAG_RELEVANCE_THRESHOLD", "0.1"))
     langsmith_tracing: bool = os.getenv("LANGSMITH_TRACING", "").lower() == "true"
-    supabase_url: str | None = os.getenv("SUPABASE_URL")
-    supabase_key: str | None = os.getenv("SUPABASE_KEY")
-    openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
+    supabase_url: str | None = os.getenv("SUPABASE_URL") or None
+    supabase_key: str | None = os.getenv("SUPABASE_KEY") or None
+    openai_api_key: str | None = os.getenv("OPENAI_API_KEY") or None
+    api_key: str | None = os.getenv("API_KEY") or None
+    rate_limit: str = os.getenv("RATE_LIMIT", "30/minute")
+    # Exact browser origins allowed by CORS (comma-separated). Defaults to the
+    # local static-served frontend; override via CORS_ALLOW_ORIGINS in prod.
+    cors_allow_origins: tuple[str, ...] = tuple(
+        o.strip()
+        for o in os.getenv(
+            "CORS_ALLOW_ORIGINS", "http://localhost:5500,http://127.0.0.1:5500"
+        ).split(",")
+        if o.strip()
+    )
 
 
 settings = Settings()

@@ -1,108 +1,74 @@
-import math
+"""Grounded question answering over uploaded documents.
+
+Retrieval goes through a single path: the Chroma vector store populated at
+ingest time (``vector_store``). Chunks scoring below the configured relevance
+threshold are discarded; if nothing clears the bar the service returns a
+fallback message with no sources.
+
+Answer generation uses the OpenAI chat model when configured
+(``rag_backends.get_llm``), grounded strictly in the retrieved chunks. Without
+an OpenAI key it falls back to an extractive answer stitched from those same
+chunks, so the endpoint works offline and deterministically.
+"""
 
 from app.core.config import settings
-from app.services import chunk_service
+from app.services import rag_backends, vector_store
+from app.services.rag_prompts import ANSWER_TEMPLATE
 
 
 NO_CONTEXT_MESSAGE = "I don't have enough information in the uploaded documents."
 
 
-def _tokenize(text: str) -> list[str]:
+def _retrieve(question: str):
+    """Return retrieved (document, score) pairs that clear the relevance bar."""
+    results = vector_store.search(question, k=settings.top_k)
     return [
-        token.strip(".,!?;:()[]{}\"'").lower()
-        for token in text.split()
-        if len(token.strip(".,!?;:()[]{}\"'")) > 2
+        (doc, score)
+        for doc, score in results
+        if score >= settings.relevance_threshold
     ]
 
 
-def _bm25_scores(query_terms: list[str], corpus_tokens: list[list[str]]) -> list[float]:
-    """Classic BM25 scoring in pure Python (k1=1.5, b=0.75)."""
-    k1 = 1.5
-    b = 0.75
-    n_docs = len(corpus_tokens)
-    if n_docs == 0:
-        return []
-
-    doc_lengths = [len(tokens) for tokens in corpus_tokens]
-    avg_len = sum(doc_lengths) / n_docs if n_docs else 0.0
-
-    # Document frequency per unique query term.
-    unique_terms = set(query_terms)
-    doc_freq = {
-        term: sum(1 for tokens in corpus_tokens if term in tokens)
-        for term in unique_terms
-    }
-
-    scores = []
-    for tokens, length in zip(corpus_tokens, doc_lengths):
-        term_counts: dict[str, int] = {}
-        for token in tokens:
-            term_counts[token] = term_counts.get(token, 0) + 1
-
-        score = 0.0
-        for term in unique_terms:
-            freq = term_counts.get(term, 0)
-            if freq == 0:
-                continue
-            df = doc_freq[term]
-            idf = math.log(1 + (n_docs - df + 0.5) / (df + 0.5))
-            denom = freq + k1 * (1 - b + b * (length / avg_len if avg_len else 0))
-            score += idf * (freq * (k1 + 1)) / denom
-        scores.append(score)
-    return scores
+def _sources(docs) -> list[str]:
+    """Distinct document ids in rank order, for cited retrieval."""
+    sources: list[str] = []
+    for doc in docs:
+        document_id = doc.metadata.get("document_id")
+        if document_id and document_id not in sources:
+            sources.append(document_id)
+    return sources
 
 
-def _confidence(query_terms: list[str], retrieved_tokens: list[list[str]]) -> float:
-    """Fraction of distinct query terms covered by the retrieved chunks."""
-    unique_terms = set(query_terms)
-    if not unique_terms:
-        return 0.0
-    matched = {
-        term
-        for term in unique_terms
-        if any(term in tokens for tokens in retrieved_tokens)
-    }
-    return round(len(matched) / len(unique_terms), 4)
+def _generate_answer(question: str, docs) -> str:
+    context = "\n\n".join(doc.page_content for doc in docs)
+
+    llm = rag_backends.get_llm()
+    if llm is None:
+        # Offline fallback: extractive answer from the retrieved chunks.
+        return context
+
+    from langchain_core.output_parsers import StrOutputParser
+    from langchain_core.prompts import ChatPromptTemplate
+
+    chain = ChatPromptTemplate.from_template(ANSWER_TEMPLATE) | llm | StrOutputParser()
+    return chain.invoke({"context": context, "question": question})
 
 
 def answer_question(question: str) -> dict:
-    """Answer a question extractively from locally stored document chunks.
+    """Answer a question from ingested document chunks via vector retrieval.
 
     Returns a dict with ``answer``, ``sources``, and ``confidence_score``.
-    Never calls an external LLM.
     """
-    query_terms = _tokenize(question)
-    chunks = chunk_service.all_chunks()
+    retrieved = _retrieve(question)
 
-    if not query_terms or not chunks:
+    if not retrieved:
         return {"answer": NO_CONTEXT_MESSAGE, "sources": [], "confidence_score": 0.0}
 
-    corpus_tokens = [_tokenize(chunk["text"]) for chunk in chunks]
-    scores = _bm25_scores(query_terms, corpus_tokens)
-
-    ranked = sorted(
-        ((score, idx) for idx, score in enumerate(scores) if score > 0),
-        key=lambda item: item[0],
-        reverse=True,
-    )
-
-    if not ranked:
-        return {"answer": NO_CONTEXT_MESSAGE, "sources": [], "confidence_score": 0.0}
-
-    top = ranked[: settings.top_k]
-    top_chunks = [chunks[idx] for _, idx in top]
-    top_tokens = [corpus_tokens[idx] for _, idx in top]
-
-    answer = "\n\n".join(chunk["text"] for chunk in top_chunks)
-
-    # Distinct document ids, preserving rank order, for cited retrieval.
-    sources: list[str] = []
-    for chunk in top_chunks:
-        if chunk["document_id"] not in sources:
-            sources.append(chunk["document_id"])
+    docs = [doc for doc, _ in retrieved]
+    top_score = max(score for _, score in retrieved)
 
     return {
-        "answer": answer,
-        "sources": sources,
-        "confidence_score": _confidence(query_terms, top_tokens),
+        "answer": _generate_answer(question, docs),
+        "sources": _sources(docs),
+        "confidence_score": round(float(top_score), 4),
     }

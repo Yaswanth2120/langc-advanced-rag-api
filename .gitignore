@@ -1,3 +1,10 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Node (frontend e2e)
+node_modules/
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -13,3 +20,6 @@ __pycache__/
 
 # Local document storage (Phase 2 uploads)
 storage/
+.venv/
+.venv_*/
+.git_broken_cloud/

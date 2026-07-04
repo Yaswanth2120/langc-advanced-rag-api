@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 from app.core.config import settings
 from app.db.supabase_client import create_supabase_client
 from app.schemas.health import HealthResponse
+from app.services import rag_backends
 
 
 router = APIRouter()
@@ -37,6 +38,7 @@ def features():
         },
         "observability": "LangSmith tracing when LANGSMITH_TRACING=true",
         "optional_storage": "Supabase can be configured for persistence",
+        "embedding_backend": rag_backends.embedding_backend_name(),
     }
 
 

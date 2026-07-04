@@ -1,23 +1,51 @@
+import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
+# Force offline/deterministic config before app import (mirrors tests/__init__,
+# in case the suite is run without the tests package being imported first).
+for _var in ("OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_KEY", "LANGSMITH_API_KEY"):
+    os.environ[_var] = ""
+os.environ["API_KEY"] = "test-api-key"
+os.environ["LANGSMITH_TRACING"] = "false"
+
 from fastapi.testclient import TestClient
 
+from app.api.dependencies import get_rag_engine
+from app.core import rate_limit
 from app.main import app
-from app.services import document_service
+from app.services import document_service, vector_store
 from app.services.document_qa_service import NO_CONTEXT_MESSAGE
 
 
+API_KEY = "test-api-key"
+
+
 class RAGPipelineTestCase(unittest.TestCase):
+    """Exercises the ingest -> embed -> Chroma retrieval -> answer pipeline.
+
+    Runs against the offline backend (deterministic local embeddings and an
+    extractive answer built from the retrieved chunks), so no OpenAI calls are
+    made. Retrieval always goes through the Chroma vector store.
+    """
+
     def setUp(self):
-        self.client = TestClient(app)
+        # Default the X-API-Key header on every request so protected routes pass.
+        self.client = TestClient(app, headers={"X-API-Key": API_KEY})
         self._tmp_dir = Path(tempfile.mkdtemp())
         self._original_storage = document_service.STORAGE_DIR
         document_service.configure_storage(self._tmp_dir)
+        # Reset process-global state so tests do not leak into one another.
+        vector_store.reset()
+        get_rag_engine.cache_clear()
+        rate_limit.reset_limits()
 
     def tearDown(self):
+        vector_store.reset()
+        get_rag_engine.cache_clear()
+        rate_limit.reset_limits()
         document_service.configure_storage(self._original_storage)
         shutil.rmtree(self._tmp_dir, ignore_errors=True)
 
@@ -73,7 +101,7 @@ class RAGPipelineTestCase(unittest.TestCase):
         response = self.client.get("/documents/missing/chunks")
         self.assertEqual(response.status_code, 404)
 
-    def test_document_query_returns_grounded_answer(self):
+    def test_document_query_retrieves_via_embeddings(self):
         doc_id = self._upload(
             "space.txt",
             b"The Voyager spacecraft carries a golden record with sounds from Earth.",
@@ -87,11 +115,16 @@ class RAGPipelineTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
+        # Answer is grounded in the retrieved chunk.
         self.assertIn("golden record", body["answer"])
+        # Similarity retrieval cites the source document.
         self.assertEqual(body["sources"], [doc_id])
+        # Relevance-based confidence is populated for a real hit.
         self.assertGreater(body["confidence_score"], 0.0)
 
-    def test_no_relevant_chunks_returns_fallback(self):
+    def test_query_ignores_unrelated_document(self):
+        # An off-topic document must not be retrieved: its similarity falls
+        # below the relevance threshold, yielding the fallback response.
         doc_id = self._upload("space.txt", b"The Voyager spacecraft carries a golden record.")
         self.client.post(f"/documents/{doc_id}/ingest")
 

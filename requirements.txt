@@ -4,6 +4,7 @@ python-dotenv>=1.2.1
 pydantic>=2.13.4
 python-multipart>=0.0.9
 pypdf>=6.6.2
+slowapi>=0.1.9
 
 langchain>=1.2.7
 langchain-core>=1.2.7
