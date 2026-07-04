@@ -59,6 +59,9 @@ def _get_client():
 
 
 def insert(record: dict) -> None:
+    # record["created_at"] is a timezone-aware ISO-8601 string; Postgres casts
+    # it to the table's timestamptz column on insert (migrations 001/003), and
+    # reads come back as ISO-8601 strings, matching the local-JSON backend.
     _get_client().table(TABLE).insert(record).execute()
 
 

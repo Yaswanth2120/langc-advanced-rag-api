@@ -13,7 +13,10 @@ create table if not exists public.documents (
     filename    text not null,
     file_type   text not null,
     status      text not null,
-    created_at  text not null
+    -- The app writes timezone-aware ISO-8601 strings; Postgres casts them to
+    -- timestamptz on insert and PostgREST returns them as ISO-8601 strings,
+    -- so DocumentMetadata.created_at stays a plain string in the API.
+    created_at  timestamptz not null
 );
 
 -- RLS is enabled and NO policies are created for anon/authenticated.
