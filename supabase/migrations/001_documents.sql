@@ -16,14 +16,9 @@ create table if not exists public.documents (
     created_at  text not null
 );
 
--- The app authenticates to PostgREST with the project's anon/publishable key,
--- so row-level security must permit that role to read and write this table.
+-- RLS is enabled and NO policies are created for anon/authenticated.
+-- The FastAPI backend accesses this table exclusively with the service-role
+-- key (SUPABASE_SERVICE_ROLE_KEY), which bypasses RLS by design. The anon/
+-- publishable key — which is shipped client-side and is not a secret — has
+-- zero access to this table.
 alter table public.documents enable row level security;
-
-drop policy if exists "documents_anon_all" on public.documents;
-create policy "documents_anon_all"
-    on public.documents
-    for all
-    to anon, authenticated
-    using (true)
-    with check (true);

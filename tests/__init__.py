@@ -22,6 +22,7 @@ for _var in (
     "OPENAI_API_KEY",
     "SUPABASE_URL",
     "SUPABASE_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
     "LANGSMITH_API_KEY",
 ):
     os.environ[_var] = ""

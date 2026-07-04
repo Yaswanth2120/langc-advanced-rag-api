@@ -264,6 +264,7 @@ LANGSMITH_API_KEY=your_langsmith_api_key
 LANGSMITH_PROJECT=multi-agent-research
 
 SUPABASE_URL=your_supabase_project_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 SUPABASE_KEY=your_supabase_anon_key
 
 API_KEY=your_api_key
@@ -287,25 +288,35 @@ LangSmith projects usually appear after the first traced request.
 
 ## Supabase Setup
 
-When `SUPABASE_URL` and `SUPABASE_KEY` are set, document metadata (the
-`DocumentMetadata` fields) is persisted to a Supabase `documents` table instead
-of the local `storage/documents.json` file. When they are unset, the app falls
-back to local JSON.
+When `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set, document metadata
+(the `DocumentMetadata` fields) is persisted to a Supabase `documents` table
+instead of the local `storage/documents.json` file. When they are unset, the
+app falls back to local JSON.
+
+**Key model (security-relevant):** the backend talks to Supabase exclusively
+with the **service-role key** (`SUPABASE_SERVICE_ROLE_KEY`), which bypasses RLS
+by design and must live server-side only — never in the frontend, never in
+logs. The **anon/publishable key** (`SUPABASE_KEY`) has zero access to the
+`documents` table: RLS is enabled with no policies for `anon`/`authenticated`
+(see `supabase/migrations/002_lock_down_documents_rls.sql`), so holding the
+anon key does not let anyone bypass the FastAPI auth layer. The frontend never
+talks to Supabase at all; it only calls this API.
 
 1. Create a free Supabase project.
-2. Copy the project URL and the anon/publishable key into `.env`.
+2. Copy the project URL and the **service-role** key into `.env`
+   (`SUPABASE_SERVICE_ROLE_KEY`).
 3. Provision the schema from this repo — do not create the table by hand:
 
    ```bash
    supabase link --project-ref <your-project-ref>
-   supabase db push        # applies supabase/migrations/001_documents.sql
+   supabase db push        # applies supabase/migrations/*.sql
    ```
 
-   The migration creates `public.documents` with columns matching
+   The migrations create `public.documents` with columns matching
    `app/schemas/document.py` exactly (`document_id`, `filename`, `file_type`,
-   `status`, `created_at`) and a row-level-security policy allowing the anon
-   key to read/write it.
-4. Run the API and visit `/supabase/health`.
+   `status`, `created_at`), enable RLS, and leave no anon policies.
+4. Run the API and visit `/supabase/health` (reports which key type is
+   configured).
 
 The `documents` table must exist before uploads work with Supabase enabled —
 `tests/test_supabase_integration.py` exercises this end-to-end against a real
@@ -340,7 +351,7 @@ LANGSMITH_TRACING
 LANGSMITH_API_KEY
 LANGSMITH_PROJECT
 SUPABASE_URL
-SUPABASE_KEY
+SUPABASE_SERVICE_ROLE_KEY
 API_KEY
 RATE_LIMIT
 CORS_ALLOW_ORIGINS
@@ -359,8 +370,8 @@ embedding backend, so no OpenAI calls are made.
 
 `tests/test_supabase_integration.py` is an integration test that runs against a
 real Supabase project. It is skipped unless credentials are provided, and runs
-in CI via the `SUPABASE_URL` / `SUPABASE_KEY` GitHub Actions secrets (passed as
-`SUPABASE_TEST_URL` / `SUPABASE_TEST_KEY`). A separate CI job runs the
+in CI via the `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` GitHub Actions
+secrets (passed as `SUPABASE_TEST_URL` / `SUPABASE_TEST_KEY`). A separate CI job runs the
 Playwright frontend end-to-end test. See `.github/workflows/tests.yml`.
 
 ## Evaluations

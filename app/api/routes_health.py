@@ -44,11 +44,19 @@ def features():
 
 @router.get("/supabase/health")
 def supabase_health():
-    if not settings.supabase_url or not settings.supabase_key:
-        return {"configured": False, "message": "SUPABASE_URL or SUPABASE_KEY missing"}
+    key = settings.supabase_service_role_key or settings.supabase_key
+    if not settings.supabase_url or not key:
+        return {
+            "configured": False,
+            "message": "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY/SUPABASE_KEY missing",
+        }
 
     try:
-        create_supabase_client(settings.supabase_url, settings.supabase_key)
-        return {"configured": True, "message": "Supabase client created"}
+        create_supabase_client(settings.supabase_url, key)
+        return {
+            "configured": True,
+            "message": "Supabase client created",
+            "key_type": "service_role" if settings.supabase_service_role_key else "anon",
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

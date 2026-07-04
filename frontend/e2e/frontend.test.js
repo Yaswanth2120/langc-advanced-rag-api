@@ -20,7 +20,8 @@ const API = process.env.API_URL || "http://127.0.0.1:8000";
 const KEY = process.env.API_KEY || "demo-key";
 
 (async () => {
-  const tmp = path.join(os.tmpdir(), `fe-e2e-${Date.now()}.txt`);
+  const marker = `fe-e2e-${Date.now()}.txt`;
+  const tmp = path.join(os.tmpdir(), marker);
   fs.writeFileSync(
     tmp,
     "The Kestrel Mark IV turbine operates at 12000 RPM and uses a magnetic " +
@@ -81,8 +82,49 @@ const KEY = process.env.API_KEY || "demo-key";
     const sources = await page.$$eval("#sources .chip", (els) => els.map((e) => e.textContent));
     const conf = await page.textContent("#confVal");
 
-    assert.ok(answer.length > 0, "answer is empty");
-    assert.ok(sources.length > 0, "no sources returned");
+    // ---- Network-level assertions: status codes AND body contents of every
+    // ---- backend response the UI triggered (not just "nothing threw").
+
+    // Upload: 200, body is the DocumentMetadata for our marker file.
+    const up = captured["POST /documents/upload"];
+    assert.ok(up, "no /documents/upload response captured");
+    assert.strictEqual(up.status, 200, `upload status ${up.status}: ${JSON.stringify(up.body)}`);
+    assert.ok(up.body && up.body.document_id, "upload body missing document_id");
+    assert.strictEqual(up.body.filename, marker, "upload body filename mismatch");
+    assert.strictEqual(up.body.status, "uploaded", "upload body status != 'uploaded'");
+    const docId = up.body.document_id;
+
+    // Ingest: 200, body is a non-empty chunk array for that document.
+    const ingKey = Object.keys(captured).find((k) => k === `POST /documents/${docId}/ingest`);
+    assert.ok(ingKey, "no /documents/{id}/ingest response captured");
+    const ing = captured[ingKey];
+    assert.strictEqual(ing.status, 200, `ingest status ${ing.status}: ${JSON.stringify(ing.body)}`);
+    assert.ok(Array.isArray(ing.body) && ing.body.length >= 1, "ingest body is not a non-empty chunk array");
+    assert.strictEqual(ing.body[0].document_id, docId, "ingest chunk document_id mismatch");
+    assert.ok(ing.body[0].text.includes("12000 RPM"), "ingest chunk text missing document content");
+
+    // List: 200, body contains the uploaded document's row.
+    const list = captured["GET /documents"];
+    assert.ok(list, "no /documents response captured");
+    assert.strictEqual(list.status, 200, `list status ${list.status}: ${JSON.stringify(list.body)}`);
+    assert.ok(Array.isArray(list.body), "list body is not an array");
+    const row = list.body.find((r) => r.document_id === docId);
+    assert.ok(row, "uploaded document not present in GET /documents body");
+    assert.strictEqual(row.filename, marker, "listed filename mismatch");
+
+    // Query: 200, grounded answer citing the uploaded document.
+    const q = captured["POST /query/documents"];
+    assert.ok(q, "no /query/documents response captured");
+    assert.strictEqual(q.status, 200, `query status ${q.status}: ${JSON.stringify(q.body)}`);
+    assert.ok(q.body.answer.includes("12000"), `answer not grounded in document: ${q.body.answer}`);
+    assert.ok(Array.isArray(q.body.sources) && q.body.sources.includes(docId),
+      `sources ${JSON.stringify(q.body.sources)} do not cite uploaded doc ${docId}`);
+    assert.ok(q.body.confidence_score > 0, `confidence_score not > 0: ${q.body.confidence_score}`);
+
+    // DOM-level assertions: what the user actually sees matches the API body.
+    assert.ok(answer.includes("12000"), "rendered answer missing document fact");
+    assert.deepStrictEqual(sources, q.body.sources, "rendered source chips != API sources");
+    assert.strictEqual(Number(conf), q.body.confidence_score, "rendered confidence != API value");
 
     // Evidence.
     const feat = captured["GET /features"];
@@ -93,7 +135,7 @@ const KEY = process.env.API_KEY || "demo-key";
     console.log("\nRAW /query/documents response:");
     console.log(JSON.stringify(captured["POST /query/documents"], null, 2));
 
-    console.log("\nPASS: upload + list + query all succeeded via the UI.");
+    console.log("\nPASS: upload + list + query all succeeded via the UI, with status/body assertions.");
     await browser.close();
     process.exit(0);
   } catch (e) {

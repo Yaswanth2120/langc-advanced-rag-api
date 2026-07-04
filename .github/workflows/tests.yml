@@ -27,9 +27,13 @@ jobs:
         env:
           # Makes tests/test_supabase_integration.py run for real in CI instead
           # of skipping. SUPABASE_TEST_* is used because the test bootstrap
-          # empties SUPABASE_URL/SUPABASE_KEY for offline determinism.
+          # empties SUPABASE_URL/SUPABASE_KEY/SUPABASE_SERVICE_ROLE_KEY for
+          # offline determinism.
+          # The key MUST be the service-role key once RLS lockdown
+          # (migration 002) is applied; the anon-key fallback below only
+          # works before that and will be removed.
           SUPABASE_TEST_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_TEST_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_TEST_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_KEY }}
         run: python -m unittest discover -s tests -t .
 
   frontend-e2e:

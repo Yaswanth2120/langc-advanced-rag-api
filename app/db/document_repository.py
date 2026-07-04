@@ -1,33 +1,60 @@
 """Document metadata persistence.
 
-When ``SUPABASE_URL`` and ``SUPABASE_KEY`` are configured, document metadata is
+When ``SUPABASE_URL`` and ``SUPABASE_SERVICE_ROLE_KEY`` are configured, document metadata is
 persisted to a Supabase ``documents`` table. Otherwise it falls back to the
 local JSON store managed by ``document_service``. This keeps the Supabase
 integration wired and usable in production while the app still runs with no
 external database.
 """
 
+import logging
+
 from app.core import offline
 from app.core.config import settings
 from app.db.supabase_client import create_supabase_client
 
 
+logger = logging.getLogger(__name__)
+
 TABLE = "documents"
 
 _client = None
+_warned_anon = False
+
+
+def _backend_key() -> str | None:
+    """The key used for server-side Supabase access.
+
+    Prefers the service-role key (bypasses RLS by design; meant for trusted
+    server-to-server use). Falls back to the anon key ONLY for backwards
+    compatibility — once RLS is locked down (migration 002) the anon key has
+    zero access to the documents table and this fallback stops working.
+    Key values are never logged.
+    """
+    global _warned_anon
+    if settings.supabase_service_role_key:
+        return settings.supabase_service_role_key
+    if settings.supabase_key and not _warned_anon:
+        logger.warning(
+            "Supabase document persistence is using the ANON key server-side. "
+            "This is deprecated and will fail once RLS is locked down "
+            "(supabase/migrations/002). Set SUPABASE_SERVICE_ROLE_KEY."
+        )
+        _warned_anon = True
+    return settings.supabase_key
 
 
 def enabled() -> bool:
     """True when Supabase credentials are configured and offline mode is off."""
     if offline.is_offline():
         return False
-    return bool(settings.supabase_url and settings.supabase_key)
+    return bool(settings.supabase_url and _backend_key())
 
 
 def _get_client():
     global _client
     if _client is None:
-        _client = create_supabase_client(settings.supabase_url, settings.supabase_key)
+        _client = create_supabase_client(settings.supabase_url, _backend_key())
     return _client
 
 

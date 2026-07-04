@@ -1,19 +1,22 @@
 """Integration test for the Supabase-backed document metadata path.
 
 Unlike the rest of the suite, this test does NOT run offline. It forces
-``offline=False`` and points the app at a real Supabase project (credentials
-read straight from ``.env`` or from ``SUPABASE_TEST_URL``/``SUPABASE_TEST_KEY``),
-then drives the HTTP layer: it uploads a document (``document_repository.insert``)
-and lists documents (``document_repository.list_all``) through the FastAPI app.
+``offline=False`` and points the app at a real Supabase project, then drives
+the HTTP layer: it uploads a document (``document_repository.insert``) and
+lists documents (``document_repository.list_all``) through the FastAPI app.
+
+Key selection (server-side key, fed through the service-role slot):
+1. ``SUPABASE_TEST_KEY`` env var (CI maps the SUPABASE_SERVICE_ROLE_KEY
+   secret here),
+2. ``SUPABASE_SERVICE_ROLE_KEY`` from ``.env``,
+3. ``SUPABASE_KEY`` (anon) from ``.env`` — works ONLY until RLS lockdown
+   (supabase/migrations/002) is applied; after that this test will fail with
+   anon credentials, which is the desired signal to switch to service-role.
 
 The Supabase code path is exercised for real (``enabled() is True``), not
-skipped or stubbed out. It therefore fails when the ``documents`` table has not
-been provisioned from ``supabase/migrations/001_documents.sql`` and passes once
-it has.
-
-The test is skipped only when no Supabase credentials are available at all
-(e.g. CI without secrets), so it never produces a false green while silently
-doing nothing where creds exist.
+skipped or stubbed out. It fails when the ``documents`` table has not been
+provisioned from ``supabase/migrations/``. It is skipped only when no
+credentials are available at all (e.g. CI without secrets).
 """
 
 import os
@@ -29,7 +32,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 _ENV = dotenv_values(REPO_ROOT / ".env")
 
 SUPABASE_URL = os.environ.get("SUPABASE_TEST_URL") or _ENV.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_TEST_KEY") or _ENV.get("SUPABASE_KEY")
+SUPABASE_KEY = (
+    os.environ.get("SUPABASE_TEST_KEY")
+    or _ENV.get("SUPABASE_SERVICE_ROLE_KEY")
+    or _ENV.get("SUPABASE_KEY")
+)
 
 # Auth must be configured for the protected routes (fail-closed).
 os.environ["API_KEY"] = os.environ.get("API_KEY") or "test-api-key"
@@ -57,12 +64,16 @@ class SupabaseDocumentsIntegrationTest(unittest.TestCase):
         document_service.configure_storage(self._tmp_dir)
 
         # Point the app at the real Supabase project with offline mode OFF.
+        # The key goes into the service-role slot: that is the slot the
+        # backend uses for table access (document_repository._backend_key).
         self._orig_offline = offline.is_offline()
         self._orig_url = settings.supabase_url
         self._orig_key = settings.supabase_key
+        self._orig_service_key = settings.supabase_service_role_key
         offline.set_offline(False)
         object.__setattr__(settings, "supabase_url", SUPABASE_URL)
-        object.__setattr__(settings, "supabase_key", SUPABASE_KEY)
+        object.__setattr__(settings, "supabase_service_role_key", SUPABASE_KEY)
+        object.__setattr__(settings, "supabase_key", None)
         document_repository.reset_client()
 
         # Sanity: we are genuinely on the Supabase path, not local JSON.
@@ -78,6 +89,7 @@ class SupabaseDocumentsIntegrationTest(unittest.TestCase):
                 pass
         object.__setattr__(settings, "supabase_url", self._orig_url)
         object.__setattr__(settings, "supabase_key", self._orig_key)
+        object.__setattr__(settings, "supabase_service_role_key", self._orig_service_key)
         document_repository.reset_client()
         offline.set_offline(self._orig_offline)
         document_service.configure_storage(self._orig_storage)

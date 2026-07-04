@@ -20,7 +20,16 @@ class Settings:
     relevance_threshold: float = float(os.getenv("RAG_RELEVANCE_THRESHOLD", "0.1"))
     langsmith_tracing: bool = os.getenv("LANGSMITH_TRACING", "").lower() == "true"
     supabase_url: str | None = os.getenv("SUPABASE_URL") or None
+    # Anon/publishable key. NOT sufficient for server-side table access once
+    # RLS is locked down (migration 002); kept for /supabase/health and as a
+    # temporary fallback only.
     supabase_key: str | None = os.getenv("SUPABASE_KEY") or None
+    # Service-role key (bypasses RLS; server-side ONLY). This is what the
+    # backend uses to access the documents table. Never expose client-side,
+    # never log it.
+    supabase_service_role_key: str | None = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY") or None
+    )
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY") or None
     api_key: str | None = os.getenv("API_KEY") or None
     rate_limit: str = os.getenv("RATE_LIMIT", "30/minute")
