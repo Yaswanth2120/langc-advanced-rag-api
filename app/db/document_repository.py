@@ -5,6 +5,15 @@ persisted to a Supabase ``documents`` table. Otherwise it falls back to the
 local JSON store managed by ``document_service``. This keeps the Supabase
 integration wired and usable in production while the app still runs with no
 external database.
+
+``text_path`` decision: the live Supabase table carries a legacy, nullable
+``text_path`` column (see supabase/migrations/003_align_schema.sql) that this
+application neither writes nor reads — on EITHER backend. Local file paths
+are always derived from ``document_id``
+(``document_service.stored_path_for``/``text_path_for``), so inserts send the
+five DocumentMetadata fields only (Supabase leaves ``text_path`` NULL, local
+JSON has no such key), and reads tolerate its presence because
+``DocumentMetadata`` ignores extra fields (pydantic default ``extra="ignore"``).
 """
 
 import logging

@@ -185,7 +185,7 @@
             <td>${escapeHtml(d.filename)}</td>
             <td>${escapeHtml(d.file_type)}</td>
             <td>${escapeHtml(d.status)}</td>
-            <td class="mono">${escapeHtml((d.created_at || "").slice(0, 19))}</td>
+            <td class="mono">${escapeHtml(fmtDate(d.created_at))}</td>
             <td class="mono">${escapeHtml((d.document_id || "").slice(0, 8))}</td>
           </tr>`).join("");
         wrap.innerHTML = `<table><thead><tr>
@@ -199,6 +199,18 @@
 
     function escapeHtml(s) {
       return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    // created_at is an ISO-8601 timestamptz string from the API; render it as
+    // a real local date, not a raw string slice.
+    function fmtDate(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso); // fall back to raw value
+      return d.toLocaleString(undefined, {
+        year: "numeric", month: "short", day: "2-digit",
+        hour: "2-digit", minute: "2-digit",
+      });
     }
 
     $("saveConn").onclick = async () => {

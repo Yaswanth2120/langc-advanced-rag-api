@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -6,9 +8,10 @@ class DocumentMetadata(BaseModel):
     filename: str
     file_type: str
     status: str
-    # ISO-8601 string in both storage backends. The app writes
-    # datetime.now(timezone.utc).isoformat(); local JSON stores that string
-    # verbatim, and Supabase stores it as timestamptz (see
-    # supabase/migrations/003) which PostgREST serializes back to an ISO-8601
-    # string. Kept as str so both backends round-trip identically.
-    created_at: str
+    # Matches the live table's timestamptz column (supabase/migrations/003).
+    # Both backends feed pydantic an ISO-8601 string (local JSON stores it
+    # verbatim; PostgREST serializes timestamptz to it); pydantic parses to a
+    # tz-aware datetime and FastAPI serializes responses back to ISO-8601.
+    # Note: Supabase rows also carry a legacy text_path field; pydantic's
+    # default extra="ignore" drops it from API responses.
+    created_at: datetime

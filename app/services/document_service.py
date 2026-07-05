@@ -35,7 +35,12 @@ def stored_path_for(document_id: str, file_type: str) -> Path:
 
 
 def text_path_for(document_id: str) -> Path:
-    """Local path of the extracted plain text for a document."""
+    """Local path of the extracted plain text for a document.
+
+    Paths are always DERIVED from document_id; they are never persisted.
+    The live Supabase table's legacy ``text_path`` column stays NULL and is
+    ignored on read (see app/db/document_repository.py).
+    """
     return _uploads_dir() / f"{document_id}.txt"
 
 

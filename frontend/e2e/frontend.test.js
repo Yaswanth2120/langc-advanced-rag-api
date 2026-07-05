@@ -69,6 +69,14 @@ const KEY = process.env.API_KEY || "demo-key";
     const filenames = await page.$$eval("#docsWrap table tbody tr td:first-child", (t) => t.map((e) => e.textContent));
     assert.ok(filenames.some((f) => f.endsWith(".txt")), "uploaded .txt not shown in document list");
 
+    // created_at must render as a formatted locale date (timestamptz handled),
+    // not "Invalid Date" and not a raw ISO string slice.
+    const createdCell = (await page.textContent("#docsWrap table tbody tr td:nth-child(4)")).trim();
+    assert.ok(createdCell.length > 0, "Created cell is empty");
+    assert.ok(!createdCell.includes("Invalid Date"), `Created cell failed to parse: ${createdCell}`);
+    assert.ok(!/^\d{4}-\d{2}-\d{2}T/.test(createdCell), `Created cell is a raw ISO string, not formatted: ${createdCell}`);
+    console.log("rendered Created cell:", createdCell);
+
     // ACTION 3: query returns an answer with sources.
     await page.fill("#question", "How many RPM does the Kestrel Mark IV turbine operate at?");
     await page.click("#askBtn");

@@ -1,21 +1,23 @@
 -- Document metadata table for LangC Advanced RAG API.
 --
--- Columns match app/schemas/document.py (DocumentMetadata) exactly:
---   document_id, filename, file_type, status, created_at.
+-- NOTE: this file reflects the ORIGINAL intended schema, not the current
+-- live state. The live table drifted from it (it additionally has a nullable
+-- text_path column); migration 003_align_schema.sql documents the live
+-- reality and is AUTHORITATIVE for the final schema. Always apply the full
+-- migration chain (001 -> 002 -> 003); never this file alone.
 --
 -- Provision a fresh Supabase project from this repo with:
 --   supabase db push
--- (or run this file against the project's database). Do not create the
--- table by hand in the dashboard.
+-- (or run these files against the project's database in order). Do not
+-- create the table by hand in the dashboard.
 
 create table if not exists public.documents (
     document_id text primary key,
     filename    text not null,
     file_type   text not null,
     status      text not null,
-    -- The app writes timezone-aware ISO-8601 strings; Postgres casts them to
-    -- timestamptz on insert and PostgREST returns them as ISO-8601 strings,
-    -- so DocumentMetadata.created_at stays a plain string in the API.
+    -- timestamptz to match the live table (see 003). The app writes
+    -- timezone-aware ISO-8601 strings, which Postgres casts on insert.
     created_at  timestamptz not null
 );
 
