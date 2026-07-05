@@ -34,6 +34,13 @@ Screenshots of the deployed frontend against a real uploaded document
 
 ![Avionics summary query](docs/screenshots/summarize.png)
 
+**Negative/fallback query — no hallucination**
+
+Query: "Does this document mention anything about lunar landing systems?"
+Answer: "I do not know."
+
+![Negative/fallback query](docs/screenshots/DoNotKnow.png)
+
 ## What It Does
 
 - Answers questions through a FastAPI `/ask` endpoint.
