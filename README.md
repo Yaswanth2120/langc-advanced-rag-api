@@ -4,6 +4,36 @@ A deployable advanced Retrieval-Augmented Generation API built with FastAPI, Lan
 
 This repo is cleaned up as a portfolio-ready project: one production API, organized source code, preserved learning examples, deployment config, and clear setup steps.
 
+## Live Demo
+
+- Backend: https://langc-advanced-rag-api.onrender.com
+- Frontend: https://langc-advanced-rag-api-1.onrender.com
+
+Note: free-tier Render instances spin down on inactivity; first request after
+idle may take 50+ seconds.
+
+## Demo
+
+Screenshots of the deployed frontend against a real uploaded document
+(`docs/screenshots/`):
+
+**Comparison query (thrust vs power)**
+
+![Comparison query](docs/screenshots/compare.png)
+
+**Thermal systems query**
+
+![Thermal systems query](docs/screenshots/multiple.png)
+
+> Known limitation: broad category queries (e.g. "list every system related to
+> X") can under-retrieve when relevant chunks don't share the query's exact
+> terminology. Confirmed via test: a thermal-management query returned only 1
+> of 3 relevant sections.
+
+**Avionics summary query**
+
+![Avionics summary query](docs/screenshots/summarize.png)
+
 ## What It Does
 
 - Answers questions through a FastAPI `/ask` endpoint.
@@ -40,46 +70,78 @@ curl -X POST http://127.0.0.1:8000/ask \
 
 ## Project Structure
 
+Actual output of
+`tree -a -L 2 -I '__pycache__|.venv|node_modules|.git|.vscode|storage|.env'`
+at the repo root (`.env` and `storage/` are gitignored local state, excluded
+here since neither exists in a fresh clone):
+
 ```text
-LangC/
-├── requirements.txt
+.
+├── .dockerignore
+├── .env.example
+├── .github
+│   └── workflows
+├── .gitignore
+├── .python-version
+├── Dockerfile
+├── Makefile
+├── README.md
+├── agents
+│   ├── architect.md
+│   ├── backend.md
+│   ├── devops.md
+│   ├── frontend.md
+│   ├── qa.md
+│   └── rag.md
+├── app
+│   ├── __init__.py
+│   ├── api
+│   ├── core
+│   ├── db
+│   ├── main.py
+│   ├── schemas
+│   └── services
+├── docker-compose.yml
+├── docs
+│   └── screenshots
+├── evals
+│   ├── __init__.py
+│   ├── questions.json
+│   ├── results.md
+│   └── run_eval.py
+├── examples
+│   ├── advanced_rag
+│   ├── basic_langchain
+│   └── langgraph
+├── frontend
+│   ├── README.md
+│   ├── e2e
+│   └── index.html
+├── phases
+│   ├── phase1_refactor.md
+│   ├── phase2_upload.md
+│   ├── phase3_rag.md
+│   ├── phase4_evals.md
+│   ├── phase5_devops.md
+│   ├── phase6_merge_rag.md
+│   └── phase7_frontend.md
 ├── pyproject.toml
 ├── render.yaml
-├── README.md
-├── .env.example
-├── app/
-│   ├── main.py                    FastAPI app, CORS, rate limiter
-│   ├── core/
-│   │   ├── config.py              Env + model configuration
-│   │   ├── rate_limit.py          slowapi limiter
-│   │   └── offline.py             Force local/no-network backends
-│   ├── api/
-│   │   ├── dependencies.py        RAG engine + X-API-Key auth
-│   │   ├── routes_health.py       /, /health, /features, /supabase/health
-│   │   ├── routes_query.py        /ask, /query/documents
-│   │   └── routes_documents.py    /documents upload/list/ingest/chunks
-│   ├── services/
-│   │   ├── rag_service.py         Advanced RAG engine (/ask)
-│   │   ├── rag_backends.py        OpenAI vs local embedding/LLM selection
-│   │   ├── local_embeddings.py    Deterministic offline embeddings
-│   │   ├── vector_store.py        Chroma collection for uploaded docs
-│   │   ├── document_service.py    Upload + metadata (Supabase/local)
-│   │   ├── document_qa_service.py Grounded QA over uploaded docs
-│   │   ├── chunk_service.py       Chunking + ingest
-│   │   ├── rag_documents.py       Built-in knowledge base (/ask)
-│   │   └── rag_prompts.py         Prompt templates
-│   ├── schemas/                   Request/response models
-│   └── db/
-│       ├── supabase_client.py     Supabase client helper
-│       └── document_repository.py Supabase documents table access
-├── frontend/
-│   ├── index.html                 Static web UI
-│   └── e2e/                       Headless Playwright test
-├── supabase/
-│   └── migrations/                SQL schema (documents table)
-├── evals/                         Local RAG evaluation pipeline
-├── examples/                      Preserved course and advanced RAG demos
-└── tests/                         Unit + integration tests
+├── requirements.txt
+├── runtime.txt
+├── supabase
+│   └── migrations
+└── tests
+    ├── __init__.py
+    ├── test_auth.py
+    ├── test_documents.py
+    ├── test_evals.py
+    ├── test_health.py
+    ├── test_rag_pipeline.py
+    ├── test_rate_limit.py
+    └── test_supabase_integration.py
+
+23 directories, 41 files
 ```
 
 ## Local Setup
@@ -412,6 +474,13 @@ Built a production-style advanced RAG API using FastAPI, LangChain, OpenAI embed
 
 The following are genuinely not yet done after this phase:
 
+- **The RLS lockdown migration (`supabase/migrations/002_lock_down_documents_rls.sql`)
+  is written but not yet applied to the live Supabase project.** Verified live:
+  the anon key currently still returns `HTTP 200` on `SELECT` against
+  `documents`. Apply it via the Supabase SQL editor or `supabase db push`
+  before relying on RLS for protection — until then, the anon key (which is
+  not secret) has read access to that table directly, independent of the
+  FastAPI auth layer.
 - Request logging and structured observability for the document routes.
 - Per-key (not just per-IP) rate limiting and multiple API keys / roles.
 - Storing uploaded files and Chroma vectors in durable cloud storage rather
