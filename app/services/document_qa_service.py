@@ -72,3 +72,47 @@ def answer_question(question: str) -> dict:
         "sources": _sources(docs),
         "confidence_score": round(float(top_score), 4),
     }
+
+
+def stream_answer_question(question: str):
+    """Yield ``{"type": ...}`` events for a streamed answer.
+
+    First yields a single ``meta`` event with ``sources``/``confidence_score``
+    (retrieval already ran, so these are known up front), then one or more
+    ``token`` events with the answer text, then a final ``done`` event.
+
+    With the OpenAI backend this streams real token-by-token generation.
+    Offline (no LLM configured), retrieval is unaffected but there is nothing
+    to stream generation-wise, so the extractive answer is yielded as one
+    token event.
+    """
+    retrieved = _retrieve(question)
+
+    if not retrieved:
+        yield {"type": "meta", "sources": [], "confidence_score": 0.0}
+        yield {"type": "token", "text": NO_CONTEXT_MESSAGE}
+        yield {"type": "done"}
+        return
+
+    docs = [doc for doc, _ in retrieved]
+    top_score = max(score for _, score in retrieved)
+    yield {
+        "type": "meta",
+        "sources": _sources(docs),
+        "confidence_score": round(float(top_score), 4),
+    }
+
+    llm = rag_backends.get_llm()
+    if llm is None:
+        yield {"type": "token", "text": "\n\n".join(doc.page_content for doc in docs)}
+        yield {"type": "done"}
+        return
+
+    from langchain_core.output_parsers import StrOutputParser
+    from langchain_core.prompts import ChatPromptTemplate
+
+    context = "\n\n".join(doc.page_content for doc in docs)
+    chain = ChatPromptTemplate.from_template(ANSWER_TEMPLATE) | llm | StrOutputParser()
+    for chunk in chain.stream({"context": context, "question": question}):
+        yield {"type": "token", "text": chunk}
+    yield {"type": "done"}

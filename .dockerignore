@@ -24,5 +24,4 @@ storage/
 .vscode/
 
 # Project notes not needed in the image
-agents/
-phases/
+docs/dev-process/

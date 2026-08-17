@@ -139,6 +139,32 @@ class RAGPipelineTestCase(unittest.TestCase):
         self.assertEqual(body["sources"], [])
         self.assertEqual(body["confidence_score"], 0.0)
 
+    def test_document_query_stream_emits_meta_then_tokens_then_done(self):
+        import json
+
+        doc_id = self._upload(
+            "space.txt",
+            b"The Voyager spacecraft carries a golden record with sounds from Earth.",
+        )
+        self.client.post(f"/documents/{doc_id}/ingest")
+
+        response = self.client.post(
+            "/query/documents",
+            json={"question": "What does the Voyager spacecraft carry?", "stream": True},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        events = [
+            json.loads(line[len("data: ") :])
+            for line in response.text.splitlines()
+            if line.startswith("data: ")
+        ]
+        self.assertEqual(events[0]["type"], "meta")
+        self.assertEqual(events[0]["sources"], [doc_id])
+        self.assertEqual(events[-1]["type"], "done")
+        answer_text = "".join(e["text"] for e in events if e["type"] == "token")
+        self.assertIn("golden record", answer_text)
+
     def test_query_with_no_documents_returns_fallback(self):
         response = self.client.post(
             "/query/documents",

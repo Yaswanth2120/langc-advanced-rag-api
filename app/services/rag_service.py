@@ -2,6 +2,7 @@ import tempfile
 from dataclasses import dataclass
 
 from app.core.config import Settings
+from app.core.text_utils import tokenize
 from app.schemas.query import RetrievalMode
 from app.services.rag_documents import DOCUMENTS
 from app.services.rag_prompts import ANSWER_TEMPLATE, MULTI_QUERY_TEMPLATE, QUERY_REWRITE_TEMPLATE
@@ -25,23 +26,26 @@ class AdvancedRAGEngine:
         if self._ready:
             return
 
-        from langchain.chat_models import init_chat_model
         from langchain_chroma import Chroma
         from langchain_core.documents import Document
         from langchain_core.output_parsers import StrOutputParser
         from langchain_core.prompts import ChatPromptTemplate
-        from langchain_openai import OpenAIEmbeddings
         from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+        from app.services import rag_backends
 
         self.Document = Document
         self.StrOutputParser = StrOutputParser
         self.ChatPromptTemplate = ChatPromptTemplate
 
-        self.llm = init_chat_model(
-            model=self.settings.chat_model,
-            temperature=self.settings.temperature,
-        )
-        self.embeddings = OpenAIEmbeddings(model=self.settings.embedding_model)
+        # Same backend selection as document_qa_service: OpenAI when
+        # configured, otherwise the deterministic offline fallback. This is
+        # what makes /ask exercisable in CI without an API key — previously
+        # this engine hardcoded OpenAI and had no offline path at all, so the
+        # whole /ask pipeline (all four retrieval modes) went completely
+        # untested outside of manual runs against a real key.
+        self.llm = rag_backends.get_llm()
+        self.embeddings = rag_backends.get_embeddings()
 
         source_docs = [
             Document(page_content=item["content"], metadata=item["metadata"])
@@ -72,8 +76,16 @@ class AdvancedRAGEngine:
 
         docs, rewritten_query = self._retrieve(question, mode)
         context = self._format_docs(docs)
-        answer_chain = self.answer_prompt | self.llm | self.StrOutputParser()
-        answer = answer_chain.invoke({"context": context, "question": question})
+
+        if self.llm is None:
+            # Offline fallback: no LLM available, return the retrieved
+            # context verbatim (same extractive strategy as
+            # document_qa_service when OPENAI_API_KEY is unset).
+            answer = context or "I don't have enough information to answer that."
+        else:
+            answer_chain = self.answer_prompt | self.llm | self.StrOutputParser()
+            answer = answer_chain.invoke({"context": context, "question": question})
+
         sources = sorted({doc.metadata.get("source", "unknown") for doc in docs})
 
         return RAGResult(
@@ -83,6 +95,37 @@ class AdvancedRAGEngine:
             rewritten_query=rewritten_query,
             retrieved_documents=len(docs),
         )
+
+    def stream_answer(self, question: str, mode: RetrievalMode):
+        """Yield ``{"type": ...}`` events: one ``meta``, then ``token``s, then ``done``.
+
+        Mirrors ``document_qa_service.stream_answer_question``. Retrieval
+        always runs eagerly (it's not itself streamed), so ``meta`` carries
+        the final sources/mode/rewritten_query up front; only answer
+        generation is streamed token-by-token when an LLM is configured.
+        """
+        self._lazy_setup()
+
+        docs, rewritten_query = self._retrieve(question, mode)
+        sources = sorted({doc.metadata.get("source", "unknown") for doc in docs})
+        yield {
+            "type": "meta",
+            "mode": mode,
+            "sources": sources,
+            "rewritten_query": rewritten_query,
+            "retrieved_documents": len(docs),
+        }
+
+        context = self._format_docs(docs)
+        if self.llm is None:
+            yield {"type": "token", "text": context or "I don't have enough information to answer that."}
+            yield {"type": "done"}
+            return
+
+        answer_chain = self.answer_prompt | self.llm | self.StrOutputParser()
+        for chunk in answer_chain.stream({"context": context, "question": question}):
+            yield {"type": "token", "text": chunk}
+        yield {"type": "done"}
 
     def _retrieve(self, question: str, mode: RetrievalMode):
         if mode == "basic":
@@ -103,14 +146,18 @@ class AdvancedRAGEngine:
         )
 
     def _multi_query_retrieve(self, question: str):
-        query_chain = self.multi_query_prompt | self.llm | self.StrOutputParser()
-        generated = query_chain.invoke({"question": question})
         queries = [question]
-        queries.extend(
-            line.strip("- ").strip()
-            for line in generated.splitlines()
-            if line.strip()
-        )
+        if self.llm is not None:
+            # Query expansion needs an LLM; offline mode retrieves on the
+            # original question only (still correct, just without the
+            # recall boost from generated query variants).
+            query_chain = self.multi_query_prompt | self.llm | self.StrOutputParser()
+            generated = query_chain.invoke({"question": question})
+            queries.extend(
+                line.strip("- ").strip()
+                for line in generated.splitlines()
+                if line.strip()
+            )
 
         docs = []
         for query in queries[:4]:
@@ -124,7 +171,9 @@ class AdvancedRAGEngine:
 
     def _agentic_retrieve(self, question: str):
         docs = self._hybrid_retrieve(question)
-        if self._retrieval_quality(question, docs) >= 2:
+        if self.llm is None or self._top_relevance_score(question) >= self.settings.relevance_threshold:
+            # Query rewriting needs an LLM; offline mode returns the hybrid
+            # result as-is rather than pretending to retry.
             return docs, None
 
         rewrite_chain = self.rewrite_prompt | self.llm | self.StrOutputParser()
@@ -133,22 +182,30 @@ class AdvancedRAGEngine:
         return self._dedupe_docs([*retry_docs, *docs])[: self.settings.top_k + 2], rewritten_query
 
     def _keyword_retrieve(self, question: str, limit: int):
-        query_terms = self._tokenize(question)
+        query_terms = set(tokenize(question))
         scored_docs = []
         for doc in self.chunks:
-            doc_terms = self._tokenize(doc.page_content)
+            doc_terms = set(tokenize(doc.page_content))
             score = len(query_terms.intersection(doc_terms))
             if score:
                 scored_docs.append((score, doc))
         scored_docs.sort(key=lambda item: item[0], reverse=True)
         return [doc for _, doc in scored_docs[:limit]]
 
-    def _retrieval_quality(self, question: str, docs) -> int:
-        query_terms = self._tokenize(question)
-        matched_terms = set()
-        for doc in docs:
-            matched_terms.update(query_terms.intersection(self._tokenize(doc.page_content)))
-        return len(matched_terms)
+    def _top_relevance_score(self, question: str) -> float:
+        """Best embedding-similarity score for ``question`` against the corpus.
+
+        Used as the agentic-mode quality gate instead of lexical term-overlap
+        counting: overlap counts don't scale across corpus sizes and can't
+        tell a strong semantic match from a coincidental word match, whereas
+        the vector store's own relevance score is the same signal
+        ``document_qa_service`` already uses (via ``relevance_threshold``) to
+        decide whether a retrieval is good enough to answer from.
+        """
+        results = self.vector_store.similarity_search_with_relevance_scores(
+            question, k=self.settings.top_k
+        )
+        return max((score for _, score in results), default=0.0)
 
     @staticmethod
     def _format_docs(docs) -> str:
@@ -164,11 +221,3 @@ class AdvancedRAGEngine:
                 seen.add(key)
                 unique_docs.append(doc)
         return unique_docs
-
-    @staticmethod
-    def _tokenize(text: str) -> set[str]:
-        return {
-            token.strip(".,!?;:()[]{}\"'").lower()
-            for token in text.split()
-            if len(token.strip(".,!?;:()[]{}\"'")) > 2
-        }

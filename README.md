@@ -93,13 +93,6 @@ here since neither exists in a fresh clone):
 ├── Dockerfile
 ├── Makefile
 ├── README.md
-├── agents
-│   ├── architect.md
-│   ├── backend.md
-│   ├── devops.md
-│   ├── frontend.md
-│   ├── qa.md
-│   └── rag.md
 ├── app
 │   ├── __init__.py
 │   ├── api
@@ -110,6 +103,7 @@ here since neither exists in a fresh clone):
 │   └── services
 ├── docker-compose.yml
 ├── docs
+│   ├── dev-process        # planning docs from the build process (agents/, phases/)
 │   └── screenshots
 ├── evals
 │   ├── __init__.py
@@ -124,14 +118,6 @@ here since neither exists in a fresh clone):
 │   ├── README.md
 │   ├── e2e
 │   └── index.html
-├── phases
-│   ├── phase1_refactor.md
-│   ├── phase2_upload.md
-│   ├── phase3_rag.md
-│   ├── phase4_evals.md
-│   ├── phase5_devops.md
-│   ├── phase6_merge_rag.md
-│   └── phase7_frontend.md
 ├── pyproject.toml
 ├── render.yaml
 ├── requirements.txt
@@ -140,6 +126,7 @@ here since neither exists in a fresh clone):
 │   └── migrations
 └── tests
     ├── __init__.py
+    ├── test_ask_pipeline.py
     ├── test_auth.py
     ├── test_documents.py
     ├── test_evals.py
@@ -148,7 +135,7 @@ here since neither exists in a fresh clone):
     ├── test_rate_limit.py
     └── test_supabase_integration.py
 
-23 directories, 41 files
+22 directories, 29 files
 ```
 
 ## Local Setup
@@ -190,7 +177,8 @@ Common tasks are wrapped in a `Makefile`. Override the interpreter with
 make install       Install dependencies from requirements.txt
 make test          Run the test suite
 make run           Run the API locally on port 8000
-make eval          Run the local RAG evaluation
+make eval          Run the offline RAG evaluation (deterministic, no API cost)
+make eval-live     Run the same evaluation against the real configured backend
 make docker-build  Build the Docker image
 make docker-run    Run the Docker image (uses .env if present)
 ```
@@ -265,17 +253,43 @@ Requests from any other origin are rejected by the browser preflight.
 GET  /                          API info
 GET  /health                    Health check
 GET  /features                  Lists RAG capabilities
-POST /ask                       Ask a RAG question (rate limited)
+POST /ask                       Ask a RAG question (rate limited, streamable)
 GET  /supabase/health           Checks Supabase config
 POST /documents/upload          Upload a .txt/.md/.pdf document (auth)
 GET  /documents                 List uploaded documents (auth)
 POST /documents/{id}/ingest     Chunk + embed a document into Chroma (auth)
 GET  /documents/{id}/chunks     List a document's chunks (auth)
-POST /query/documents           Answer from uploaded docs (auth, rate limited)
+POST /query/documents           Answer from uploaded docs (auth, rate limited, streamable)
 ```
 
 Routes marked `(auth)` require the `X-API-Key` header when `API_KEY` is set;
 `/health` and `/features` are always open.
+
+### Streaming
+
+Both `/ask` and `/query/documents` accept `"stream": true` in the request
+body. When set, the response is Server-Sent Events (`text/event-stream`)
+instead of a single JSON object — the answer streams token-by-token as the
+LLM generates it, instead of blocking until the full response is ready.
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"What retrieval modes are supported?","mode":"hybrid","stream":true}'
+```
+
+Each line is `data: <json>`, in order:
+
+```text
+{"type": "meta", "mode": "hybrid", "sources": [...], "rewritten_query": null, "retrieved_documents": 4}
+{"type": "token", "text": "..."}       # one or more, as generation streams
+{"type": "done"}
+```
+
+`meta` always comes first — retrieval runs eagerly and isn't itself streamed,
+only the answer generation is. Offline (no `OPENAI_API_KEY`), there's no LLM
+to stream tokens from, so the extractive answer is emitted as a single
+`token` event rather than pretending to stream.
 
 ## Authentication
 
@@ -293,6 +307,15 @@ Auth **fails closed**: if `API_KEY` is unset or empty, every `/documents/*` and
 `/query/*` request is rejected with 401 (the routes are locked, never silently
 open). The app still boots without credentials — the protected routes are just
 unusable until `API_KEY` is configured. `/health` and `/features` remain open.
+
+## Observability
+
+Every request logs one structured JSON line (method, path, status code,
+duration, client IP) via `AccessLogMiddleware`
+(`app/core/logging_middleware.py`) to the `app.access` logger — enough to
+answer "what happened" from log aggregation on any host without adding an
+external dependency. For deeper request/LLM-call tracing, enable LangSmith
+(`LANGSMITH_TRACING=true`); the two are independent and both optional.
 
 ## Rate Limiting
 
@@ -447,31 +470,48 @@ Playwright frontend end-to-end test. See `.github/workflows/tests.yml`.
 
 A local evaluation pipeline measures the quality of the uploaded-document RAG
 flow. It seeds a fixed corpus into an isolated temporary storage directory,
-runs the questions in `evals/questions.json` through the same
-`/query/documents` retrieval pipeline (Chroma similarity search), and writes a
-report to `evals/results.md`.
+runs the questions in `evals/questions.json` through the real
+`/query/documents` retrieval pipeline (Chroma similarity search via
+`document_qa_service`), and writes a report.
 
-It uses the same retrieval backend as `/query/documents`: OpenAI embeddings
-when `OPENAI_API_KEY` is set, otherwise the offline local embedding backend
-(no network calls). The test suite always runs it against the local backend.
-
-Run the evals:
+Two run modes:
 
 ```bash
-.venv/bin/python -m evals.run_eval
+.venv/bin/python -m evals.run_eval          # offline: deterministic, free, CI-safe
+.venv/bin/python -m evals.run_eval --live   # live: real OpenAI embeddings + chat model
 ```
+
+`make eval` / `make eval-live` do the same. The offline run pins the local
+hashing-embedding backend (bag-of-words cosine similarity over Chroma, **not**
+BM25 and **not** a real embedding model) and an extractive "answer" — it's a
+fast, reproducible smoke test of the retrieval plumbing, and it's what CI and
+`tests/test_evals.py` run. It intentionally does **not** measure production
+answer quality; only `--live` (with `OPENAI_API_KEY` set) does that, writing
+to `evals/results_live.md` (gitignored — costs API credit, not deterministic,
+not run in CI).
+
+The corpus is deliberately adversarial, not curated to look good: it includes
+two near-miss distractor documents (Voyager vs. a Mars rover, both about
+nuclear-powered space probes), an adjacent-topic negative case, and a
+paraphrase question with no lexical overlap with its source chunk. See the
+`note` field on each entry in `evals/questions.json` for what it's designed to
+catch. The offline baseline currently scores **~86% retrieval recall**, with
+its one full miss being a multi-source "list everything" question — the same
+failure mode the Live Demo screenshots above document with a real document.
 
 Reported metrics:
 
 ```text
-retrieval hit rate         expected document appears in the returned sources
-citation/source presence   answerable questions return non-empty sources
-fallback accuracy          out-of-scope questions return the fallback message
-latency_ms                 per-question and average answer latency
+retrieval exact-hit rate    every expected source was cited (strict, all-or-nothing)
+retrieval recall            fraction of expected sources cited (multi-source aware)
+citation/source presence    answerable questions return non-empty sources
+fallback accuracy           out-of-scope questions return the fallback message
+latency_ms                  per-question and average answer latency
 ```
 
 Edit `evals/questions.json` to add cases. Each item has a `type` of
-`answerable` (with `expected_source` and `expected_keywords`) or `fallback`.
+`answerable` (with `expected_sources` — a list, to support multi-source
+questions — and `expected_keywords`) or `fallback`.
 
 ## Resume Bullet
 
@@ -488,10 +528,15 @@ The following are genuinely not yet done after this phase:
   before relying on RLS for protection — until then, the anon key (which is
   not secret) has read access to that table directly, independent of the
   FastAPI auth layer.
-- Request logging and structured observability for the document routes.
 - Per-key (not just per-IP) rate limiting and multiple API keys / roles.
-- Storing uploaded files and Chroma vectors in durable cloud storage rather
-  than the local `storage/` directory (metadata already persists to Supabase
-  when configured).
-- Evaluation datasets in LangSmith (the local eval in `evals/` is offline).
+- Storing uploaded files, Chroma vectors, and rate-limit counters in durable
+  shared storage rather than local disk/process memory (document *metadata*
+  already persists to Supabase when configured). This is the main reason the
+  app doesn't yet scale past one instance or survive a redeploy on ephemeral
+  hosting cleanly — deferred pending a decision on Redis vs. a hosted vector
+  DB (e.g. pgvector on the existing Supabase project) rather than picked
+  unilaterally.
+- Evaluation datasets in LangSmith (the local eval in `evals/` covers offline
+  retrieval plumbing plus an optional `--live` run against the real backend,
+  but isn't tracked/versioned like a LangSmith dataset would be).
 - A managed vector database if traffic outgrows local Chroma.

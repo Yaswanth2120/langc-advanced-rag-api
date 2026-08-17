@@ -2,25 +2,25 @@
   {
     "question": "What does the Voyager spacecraft carry into space?",
     "type": "answerable",
-    "expected_source": "voyager",
+    "expected_sources": ["voyager"],
     "expected_keywords": ["golden record"]
   },
   {
     "question": "How do falcons hunt their prey?",
     "type": "answerable",
-    "expected_source": "falcons",
+    "expected_sources": ["falcons"],
     "expected_keywords": ["dive", "prey"]
   },
   {
     "question": "What does photosynthesis convert sunlight into?",
     "type": "answerable",
-    "expected_source": "photosynthesis",
+    "expected_sources": ["photosynthesis"],
     "expected_keywords": ["chemical energy"]
   },
   {
     "question": "Which ocean is the largest on Earth?",
     "type": "answerable",
-    "expected_source": "oceans",
+    "expected_sources": ["oceans"],
     "expected_keywords": ["Pacific"]
   },
   {
@@ -30,5 +30,31 @@
   {
     "question": "Describe medieval Byzantine taxation policy",
     "type": "fallback"
+  },
+  {
+    "question": "What NASA robotic vehicle studies the surface of Mars?",
+    "type": "answerable",
+    "expected_sources": ["mars_rover"],
+    "expected_keywords": ["rover"],
+    "note": "Near-miss distractor case: voyager and mars_rover are both space-exploration docs. Tests whether retrieval discriminates between topically adjacent sources rather than just matching the broad 'space' topic."
+  },
+  {
+    "question": "List every propulsion technology mentioned across the documents.",
+    "type": "answerable",
+    "expected_sources": ["voyager", "mars_rover"],
+    "expected_keywords": [],
+    "note": "Multi-source recall case mirroring the README's documented thermal-management gap: the correct answer spans two documents that don't share exact terminology, so single-shot lexical/hash retrieval is expected to under-retrieve."
+  },
+  {
+    "question": "How does the plumage coloration of birds of prey change with age?",
+    "type": "fallback",
+    "note": "Adjacent-topic negative case: falcons.txt is about hunting behavior, not plumage/age. Tests that topical proximity doesn't cause a false-positive citation."
+  },
+  {
+    "question": "What gas do green plants release into the air as a byproduct of converting light energy?",
+    "type": "answerable",
+    "expected_sources": ["photosynthesis"],
+    "expected_keywords": ["oxygen"],
+    "note": "Paraphrase case: no word in the question ('gas', 'release', 'byproduct', 'light energy') appears verbatim in the source chunk. Local hashing embeddings are lexical, so this is expected to be materially harder than the exact-term questions above; the OpenAI backend should handle it more reliably."
   }
 ]

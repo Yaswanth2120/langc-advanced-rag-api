@@ -12,6 +12,8 @@ The production path uses OpenAI embeddings instead (see ``rag_backends``).
 import hashlib
 import math
 
+from app.core.text_utils import tokenize
+
 
 class LocalHashingEmbeddings:
     """A langchain-compatible embeddings object (embed_documents/embed_query)."""
@@ -19,17 +21,9 @@ class LocalHashingEmbeddings:
     def __init__(self, dim: int = 4096):
         self.dim = dim
 
-    @staticmethod
-    def _tokenize(text: str) -> list[str]:
-        return [
-            token.strip(".,!?;:()[]{}\"'").lower()
-            for token in text.split()
-            if len(token.strip(".,!?;:()[]{}\"'")) > 2
-        ]
-
     def _embed(self, text: str) -> list[float]:
         vector = [0.0] * self.dim
-        for token in self._tokenize(text):
+        for token in tokenize(text):
             index = int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16) % self.dim
             vector[index] += 1.0
 

@@ -1,7 +1,7 @@
 PYTHON ?= python
 IMAGE ?= docuintelai
 
-.PHONY: install test run eval docker-build docker-run
+.PHONY: install test run eval eval-live docker-build docker-run
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
@@ -14,6 +14,9 @@ run:
 
 eval:
 	$(PYTHON) -m evals.run_eval
+
+eval-live:
+	$(PYTHON) -m evals.run_eval --live
 
 docker-build:
 	docker build -t $(IMAGE) .
